@@ -1,7 +1,7 @@
 .PHONY: run build clean tidy format test
 
 MAIN_PATH := cmd/main.go
-APP_NAME := myapp
+APP_NAME := wifisec
 
 run:
 	@echo "正在运行应用..."
