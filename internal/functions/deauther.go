@@ -1,5 +1,7 @@
 package functions
 
+import "wifisec/internal/security"
+
 type WifiDeauthenticatorConfiguration struct {
 	Daemon bool   `json:"daemon"`
 	Count  int    `json:"count"`
@@ -9,7 +11,14 @@ type WifiDeauthenticatorConfiguration struct {
 }
 
 func WifiDeauther(arguments []string) error {
-	// DEauther UI
+	var (
+		checker security.PrivilegeChecker = security.RootChecker{}
+		err                               = checker.Check()
+	)
+
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
