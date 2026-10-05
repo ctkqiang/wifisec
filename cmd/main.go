@@ -1,6 +1,7 @@
 package main
 
 import (
+	"wifisec/internal/functions"
 	"wifisec/internal/model"
 	"wifisec/internal/utilities"
 )
@@ -19,7 +20,7 @@ var (
 )
 
 func init() {
-	// utilities.RegisterCommand("deauth", func)
+	utilities.RegisterCommand("deauth", functions.WifiDeauther)
 }
 
 func main() {
