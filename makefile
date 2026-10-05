@@ -9,7 +9,7 @@ run:
 
 build:
 	@echo "正在编译二进制文件..."
-	go build -o bin/$(APP_NAME) $(MAIN_PATH)
+	go build -o build/$(APP_NAME) $(MAIN_PATH)
 
 clean:
 	@echo "正在清理编译产物..."

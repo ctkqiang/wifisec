@@ -17,6 +17,7 @@ const (
 	colorYellow  = "\033[33m"
 	colorRed     = "\033[31m"
 	colorMagenta = "\033[35m"
+	colorWhite   = "\033[37m"
 )
 
 const (
@@ -68,6 +69,10 @@ func getLogger() *slog.Logger {
 
 func Verbose(format string, args ...any) {
 	logMsg(LevelVerbose, "[详细]", colorGray, format, args...)
+}
+
+func Debug(format string, args ...any) {
+	logMsg(LevelDebug, "[调试]", colorWhite, format, args...)
 }
 
 func Info(format string, args ...any) {
