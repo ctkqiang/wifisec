@@ -13,11 +13,16 @@ var (
 		Email:        "johnmelodymel@qq.com",
 		Weixin:       "ctkqiang",
 		Version:      "v0.0.1",
+		ProjectUrl:   "https://github.com/ctkqiang/wifisec.git",
 	}
 	defaultMinLevel = utilities.LevelInfo
 )
 
+func init() {
+	// utilities.RegisterCommand("deauth", func)
+}
+
 func main() {
 	utilities.Init(defaultMinLevel)
-	utilities.Info(developerMetadata.ToString())
+	utilities.Info("%s", developerMetadata.String())
 }
