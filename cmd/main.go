@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"wifisec/internal/constants"
 	"wifisec/internal/functions"
 	"wifisec/internal/model"
 	"wifisec/internal/utilities"
@@ -21,11 +22,18 @@ var (
 		ProjectUrl:   "https://github.com/ctkqiang/wifisec.git",
 		SessionId:    session.ID,
 	}
-	defaultMinLevel = utilities.LevelInfo
+	defaultMinLevel = constants.LevelInfo
 )
 
+var commandHandlers = map[string]utilities.CommandFunction{
+	"deauth": functions.WifiDeauther,
+	"list":   functions.WifiList,
+}
+
 func init() {
-	utilities.RegisterCommand("deauth", functions.WifiDeauther)
+	for name, handler := range commandHandlers {
+		utilities.RegisterCommand(name, handler)
+	}
 }
 
 func main() {

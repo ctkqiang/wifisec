@@ -8,24 +8,7 @@ import (
 	"os"
 	"sync"
 	"time"
-)
-
-const (
-	colorReset   = "\033[0m"
-	colorGray    = "\033[90m"
-	colorBlue    = "\033[34m"
-	colorYellow  = "\033[33m"
-	colorRed     = "\033[31m"
-	colorMagenta = "\033[35m"
-	colorWhite   = "\033[37m"
-)
-
-const (
-	LevelVerbose = slog.LevelDebug - 4
-	LevelDebug   = slog.LevelDebug
-	LevelInfo    = slog.LevelInfo
-	LevelWarn    = slog.LevelWarn
-	LevelError   = slog.LevelError
+	"wifisec/internal/constants"
 )
 
 var (
@@ -50,6 +33,7 @@ func Init(minLevel slog.Level) {
 				if a.Key == slog.TimeKey {
 					return slog.String("time", a.Value.Time().Format("15:04:05.000"))
 				}
+
 				return a
 			},
 		}
@@ -61,34 +45,52 @@ func Init(minLevel slog.Level) {
 
 func getLogger() *slog.Logger {
 	if logger == nil {
-		Init(LevelVerbose)
+		Init(constants.LevelVerbose)
 	}
 
 	return logger
 }
 
 func Verbose(format string, args ...any) {
-	logMsg(LevelVerbose, "[详细]", colorGray, format, args...)
+	logMsg(
+		constants.LevelVerbose,
+		"[详细]",
+		constants.ColorGray,
+		format,
+		args...,
+	)
 }
 
 func Debug(format string, args ...any) {
-	logMsg(LevelDebug, "[调试]", colorWhite, format, args...)
+	logMsg(constants.LevelDebug, "[调试]", constants.ColorWhite, format, args...)
 }
 
 func Info(format string, args ...any) {
-	logMsg(LevelInfo, "[信息]", colorBlue, format, args...)
+	logMsg(constants.LevelInfo, "[信息]", constants.ColorBlue, format, args...)
 }
 
 func Warn(format string, args ...any) {
-	logMsg(LevelWarn, "[警告]", colorYellow, format, args...)
+	logMsg(constants.LevelWarn, "[警告]", constants.ColorYellow, format, args...)
 }
 
 func Error(format string, args ...any) {
-	logMsg(LevelError, "[错误]", colorRed, format, args...)
+	logMsg(
+		constants.LevelError,
+		"[错误]",
+		constants.ColorRed,
+		format,
+		args...,
+	)
 }
 
 func Fatal(format string, args ...any) {
-	logMsg(LevelError, "[致命]", colorMagenta, format, args...)
+	logMsg(
+		constants.LevelError,
+		"[致命]",
+		constants.ColorMagenta,
+		format,
+		args...,
+	)
 	os.Exit(1)
 }
 
@@ -96,10 +98,20 @@ func logMsg(lvl slog.Level, levelStr string, color string, format string, args .
 	msg := fmt.Sprintf(format, args...)
 	l := getLogger()
 
-	if l.Enabled(context.Background(), lvl) {
-		timestamp := time.Now().Format("15:04:05.000")
-		fmt.Printf("%s %s %s%s%s\n", timestamp, color+levelStr+colorReset, color, msg, colorReset)
+	if !l.Enabled(context.Background(), lvl) {
+		return
 	}
+
+	timestamp := time.Now().Format("15:04:05.000")
+
+	fmt.Printf(
+		"%s %s %s%s%s\n",
+		timestamp,
+		color+levelStr+constants.ColorReset,
+		color,
+		msg,
+		constants.ColorReset,
+	)
 }
 
 func NewColoredHandler(w io.Writer, opts *slog.HandlerOptions) *ColoredHandler {
