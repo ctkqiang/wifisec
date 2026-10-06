@@ -5,16 +5,6 @@ import (
 	"wifisec/internal/model"
 )
 
-var DeveloperMetadata = model.Developer{
-	Id:           nil,
-	Name:         "钟智强",
-	Organisation: "哪吒网络安全",
-	Email:        "johnmelodymel@qq.com",
-	Weixin:       "ctkqiang",
-	Version:      "v0.0.1",
-	ProjectUrl:   "https://github.com/ctkqiang/wifisec.git",
-}
-
 const (
 	PID_FILE        = "/var/run/deauth.pid"
 	WIRELESS_FILE   = "/proc/net/wireless"
@@ -42,13 +32,6 @@ const (
 	LevelInfo    = slog.LevelInfo
 	LevelWarn    = slog.LevelWarn
 	LevelError   = slog.LevelError
-)
-
-// OUI 用于判定安全 IE 的来源：WPA1 走厂商自定义 IE，WPA2/WPA3 走 RSN IE。
-// 切片不满足 Go 对常量的要求（只能是基本类型），因此只能声明为变量。
-var (
-	WPA_OUI = []byte{0x00, 0x50, 0xF2} // Wi-Fi 联盟 WPA1 的 OUI
-	RSN_OUI = []byte{0x00, 0x0F, 0xAC} // IEEE 802.11 标准 OUI
 )
 
 const (
@@ -92,4 +75,21 @@ const (
 	// AKM（认证密钥管理）套件选择器，同样由 OUI + 类型组成。
 	AUTH_SUITE_8021X = 0x000FAC01 // IEEE 802.1X（企业级认证）
 	AUTH_SUITE_PSK   = 0x000FAC02 // PSK（个人级预共享密钥）
+)
+
+var DeveloperMetadata = model.Developer{
+	Id:           nil,
+	Name:         "钟智强",
+	Organisation: "哪吒网络安全",
+	Email:        "johnmelodymel@qq.com",
+	Weixin:       "ctkqiang",
+	Version:      "v0.0.1",
+	ProjectUrl:   "https://github.com/ctkqiang/wifisec.git",
+}
+
+// OUI 用于判定安全 IE 的来源：WPA1 走厂商自定义 IE，WPA2/WPA3 走 RSN IE。
+// 切片不满足 Go 对常量的要求（只能是基本类型），因此只能声明为变量。
+var (
+	WPA_OUI = []byte{0x00, 0x50, 0xF2} // Wi-Fi 联盟 WPA1 的 OUI
+	RSN_OUI = []byte{0x00, 0x0F, 0xAC} // IEEE 802.11 标准 OUI
 )

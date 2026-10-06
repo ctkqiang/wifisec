@@ -14,6 +14,23 @@ import (
 	"sync"
 )
 
+const (
+	// Prohibited 该信道在此法规域下被禁用，发射即违法。
+	Prohibited ChannelVerdict = iota
+	// Legal 该信道可直接使用。
+	Legal
+	// DFSRequired 该信道可用，但发射前必须完成雷达检测（CAC），
+	// 运行中检测到雷达脉冲须立即让道。
+	DFSRequired
+)
+
+// 法规数据进程内只解析一次，sync.Once 保证并发安全与惰性加载。
+var (
+	domainsOnce sync.Once
+	domains     map[string]Domain
+	domainsErr  error
+)
+
 // Band 描述一个频段在某法规域下的可用信道。
 // 2.4GHz/6GHz 仅使用 Channels；5GHz 区分 NonDFS（免雷达检测）与 DFS。
 type Band struct {
@@ -33,16 +50,6 @@ type Domain struct {
 // ChannelVerdict 表示信道在某法规域下的使用状态。
 type ChannelVerdict int
 
-const (
-	// Prohibited 该信道在此法规域下被禁用，发射即违法。
-	Prohibited ChannelVerdict = iota
-	// Legal 该信道可直接使用。
-	Legal
-	// DFSRequired 该信道可用，但发射前必须完成雷达检测（CAC），
-	// 运行中检测到雷达脉冲须立即让道。
-	DFSRequired
-)
-
 func (verdict ChannelVerdict) String() string {
 	switch verdict {
 	case Legal:
@@ -53,12 +60,6 @@ func (verdict ChannelVerdict) String() string {
 		return "禁用"
 	}
 }
-
-var (
-	domainsOnce sync.Once
-	domains     map[string]Domain
-	domainsErr  error
-)
 
 // Load 懒加载默认数据文件（进程内只解析一次）。
 // 路径查找策略见 locateDataFile。

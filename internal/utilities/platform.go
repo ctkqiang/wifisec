@@ -4,8 +4,6 @@ import (
 	"runtime"
 )
 
-type OSName int
-
 const (
 	Unknown OSName = iota
 	Windows
@@ -13,6 +11,8 @@ const (
 	Darwin
 	Android
 )
+
+type OSName int
 
 func (o OSName) String() string {
 	switch o {

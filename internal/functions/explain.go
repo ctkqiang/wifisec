@@ -12,39 +12,42 @@ import (
 // iwRegPattern 从 `iw reg get` 输出中提取内核当前生效的法规域国码。
 var iwRegPattern = regexp.MustCompile(`(?m)^country ([A-Z]{2}):`)
 
-// verdictRow 是法规对照表的一行：某法规域对目标信道的判定。
-type verdictRow struct {
-	Code    string
-	Country string
-	Status  radio.ChannelVerdict
-	Current bool // 是否为内核当前生效的法规域
-}
-
 // verdictColumns 复用泛型表格渲染，保持与主扫描表一致的排版与自适应行为。
 var verdictColumns = []tableColumn[verdictRow]{
 	{
 		Header: "国码",
-		Value: func(row verdictRow) string {
-			return row.Code
+		Value: func(r verdictRow) string {
+			return r.Code
 		},
+		Priority: 1,
 	},
 	{
-		Header: "国家/地区",
-		Value: func(row verdictRow) string {
-			if row.Current {
-				return row.Country + " ←"
-			}
+		Header:   "国家/地区",
+		Value:    rowCountry,
+		Priority: 2,
+	},
+	{
+		Header:   "信道状态",
+		Value:    func(r verdictRow) string { return r.Status.String() },
+		Color:    verdictColor,
+		Priority: 3,
+	},
+}
 
-			return row.Country
-		},
-	},
-	{
-		Header: "信道状态",
-		Value: func(row verdictRow) string {
-			return row.Status.String()
-		},
-		Color: verdictColor,
-	},
+// verdictRow 是法规对照表的一行：某法规域对目标信道的判定。
+type verdictRow struct {
+	Code, Country string
+	Status        radio.ChannelVerdict
+	Current       bool // 是否为内核当前生效的法规域
+}
+
+// rowCountry 在内核当前生效的法规域后标出 ←。
+func rowCountry(r verdictRow) string {
+	if r.Current {
+		return r.Country + " ←"
+	}
+
+	return r.Country
 }
 
 // ExplainNetworks 在锁定模式下对命中的目标网络输出全面技术解读：
@@ -99,23 +102,28 @@ func explainOne(network *WiFiNetwork, domains map[string]radio.Domain, countryOv
 func explainProfile(network *WiFiNetwork) {
 	explainSection("目标档案")
 
-	fmt.Printf("  ESSID      %s\n", valueOrPlaceholder(network.ESSID))
-	fmt.Printf("  BSSID      %s\n", valueOrPlaceholder(network.BSSID))
+	lines := []string{
+		"  ESSID      " + valueOrPlaceholder(network.ESSID),
+		"  BSSID      " + valueOrPlaceholder(network.BSSID),
+	}
 
 	if network.Channel != 0 {
-		freq := channelToFreq(network.Channel)
-		fmt.Printf("  信道       %d（%s，中心频率 %d MHz）\n", network.Channel, network.Freq, freq)
+		lines = append(lines, fmt.Sprintf("  信道       %d（%s，中心频率 %d MHz）",
+			network.Channel, network.Freq, channelToFreq(network.Channel)))
 	} else {
-		fmt.Printf("  信道       %s\n", placeholder)
+		lines = append(lines, "  信道       "+placeholder)
 	}
 
 	if network.ChannelWidth != 0 {
-		fmt.Printf("  带宽       %d MHz（%s）\n", network.ChannelWidth, widthBrief(network.ChannelWidth))
+		lines = append(lines, fmt.Sprintf("  带宽       %d MHz（%s）",
+			network.ChannelWidth, widthBrief(network.ChannelWidth)))
 	}
 
 	if network.PHY != "" && network.PHY != placeholder {
-		fmt.Printf("  PHY        %s（%s）\n", network.PHY, wifiGeneration(network.PHY))
+		lines = append(lines, fmt.Sprintf("  PHY        %s（%s）", network.PHY, wifiGeneration(network.PHY)))
 	}
+
+	fmt.Println(strings.Join(lines, "\n"))
 }
 
 // explainRegulatory 以法规域数据解读目标信道的合规性。
@@ -124,26 +132,21 @@ func explainProfile(network *WiFiNetwork) {
 func explainRegulatory(network *WiFiNetwork, domains map[string]radio.Domain, countryOverride string) {
 	explainSection("法规合规")
 
-	if network.Channel == 0 {
-		fmt.Printf("  信道未知，无法判定合规性\n")
+	if network.Channel == 0 || len(domains) == 0 {
+		fmt.Printf("  信道未知或法规数据不可用，无法判定合规性\n")
 		return
 	}
-
-	if len(domains) == 0 {
-		fmt.Printf("  法规数据不可用\n")
-		return
-	}
-
-	kernel := kernelRegDomain()
 
 	if countryOverride != "" {
 		domain := domains[countryOverride]
 		verdict := radio.Verdict(domain, network.Channel)
-		fmt.Printf("  %s（%s）：%s%s%s\n", domain.Country, domain.Name, verdictColor(verdict.String()), verdict, constants.ColorReset)
+		fmt.Printf("  %s（%s）：%s%s%s\n", domain.Country, domain.Name,
+			verdictColor(verdict.String()), verdict, constants.ColorReset)
 		explainVerdictDetail(network, verdict)
 		return
 	}
 
+	kernel := kernelRegDomain()
 	rows := make([]verdictRow, 0, len(domains))
 	for _, domain := range radio.SortedDomains(domains) {
 		rows = append(rows, verdictRow{
@@ -177,8 +180,8 @@ func explainVerdictDetail(network *WiFiNetwork, verdict radio.ChannelVerdict) {
 	case radio.DFSRequired:
 		explainDFS(network.Channel)
 	case radio.Prohibited:
-		fmt.Printf("  该信道在此法规域下禁止发射；AP 若工作于此信道，说明其法规域配置与此地不符，\n")
-		fmt.Printf("  或属于违规部署，在机场、气象站附近尤其值得警惕。\n")
+		fmt.Printf("  该信道在此法规域下禁止发射；AP 若工作于此信道，说明其法规域配置与此地不符，\n" +
+			"  或属于违规部署，在机场、气象站附近尤其值得警惕。\n")
 	}
 }
 
@@ -191,8 +194,8 @@ func explainDFS(channel int) {
 		cac = 600
 	}
 
-	fmt.Printf("  信道 %d 属 DFS 段：发射前须监听雷达 %d 秒（CAC），运行中检测到雷达脉冲必须立即换道。\n", channel, cac)
-	fmt.Printf("  这也解释了 DFS 信道上的 AP 为何偶发消失——并非故障，而是在给雷达让路。\n")
+	fmt.Printf("  信道 %d 属 DFS 段：发射前须监听雷达 %d 秒（CAC），运行中检测到雷达脉冲必须立即换道。\n"+
+		"  这也解释了 DFS 信道上的 AP 为何偶发消失——并非故障，而是在给雷达让路。\n", channel, cac)
 }
 
 // explainSecurity 按加密代际与套件评估攻击面，结论面向安全研究视角。
@@ -204,14 +207,15 @@ func explainSecurity(network *WiFiNetwork) {
 		return
 	}
 
-	fmt.Printf("  加密       %s%s%s", encryptionColor(network.Enc), network.Enc, constants.ColorReset)
+	line := fmt.Sprintf("  加密       %s%s%s", encryptionColor(network.Enc), network.Enc, constants.ColorReset)
 	if network.Cipher != "" && network.Cipher != placeholder {
-		fmt.Printf(" · 套件 %s", network.Cipher)
+		line += " · 套件 " + network.Cipher
 	}
 	if network.Auth != "" && network.Auth != placeholder {
-		fmt.Printf(" · 认证 %s", network.Auth)
+		line += " · 认证 " + network.Auth
 	}
-	fmt.Println()
+
+	fmt.Println(line)
 
 	for _, note := range securityNotes(network) {
 		fmt.Printf("  %s\n", note)
@@ -239,9 +243,7 @@ func securityNotes(network *WiFiNetwork) []string {
 	case "WPA2":
 		notes := []string{}
 		if strings.Contains(network.Auth, "PSK") || network.Auth == "" {
-			notes = append(notes,
-				"PSK 模式：四次握手（含 PMKID 免握手抓取）可被嗅探后离线字典爆破，口令强度是唯一短板。",
-			)
+			notes = append(notes, "PSK 模式：四次握手（含 PMKID 免握手抓取）可被嗅探后离线字典爆破，口令强度是唯一短板。")
 		} else {
 			notes = append(notes, "企业级认证（802.1X/RADIUS）：无 PSK 弱口令面，攻击面转向认证基础设施。")
 		}
@@ -250,8 +252,7 @@ func securityNotes(network *WiFiNetwork) []string {
 			notes = append(notes, "套件为 TKIP：过渡方案，802.11n 起规定 TKIP 下速率不得超 54 Mbps，且存在注入攻击。")
 		}
 
-		notes = append(notes, "KRACK（2017，密钥重装攻击）已在主流设备修复，剩余风险集中在弱口令。")
-		return notes
+		return append(notes, "KRACK（2017，密钥重装攻击）已在主流设备修复，剩余风险集中在弱口令。")
 	case "WPA3":
 		return []string{
 			"SAE（Dragonfly）握手：前向保密，抓包无法离线爆破口令。",
@@ -267,18 +268,24 @@ func securityNotes(network *WiFiNetwork) []string {
 func explainLinkQuality(network *WiFiNetwork) {
 	explainSection("链路质量")
 
+	lines := []string{}
 	if network.Signal != 0 {
-		fmt.Printf("  信号       %d dBm（%s）%s\n", network.Signal, signalGrade(network.Signal), signalBar(network.Signal))
+		lines = append(lines, fmt.Sprintf("  信号       %d dBm（%s）%s",
+			network.Signal, signalGrade(network.Signal), signalBar(network.Signal)))
 	}
 
 	if network.SNR != 0 {
-		fmt.Printf("  信噪比     %d dB（%s）\n", network.SNR, snrGrade(network.SNR))
+		lines = append(lines, fmt.Sprintf("  信噪比     %d dB（%s）", network.SNR, snrGrade(network.SNR)))
 	} else if network.NoiseFloor != 0 {
-		fmt.Printf("  噪声底     %d dBm\n", network.NoiseFloor)
+		lines = append(lines, fmt.Sprintf("  噪声底     %d dBm", network.NoiseFloor))
 	}
 
 	if network.Rate != 0 {
-		fmt.Printf("  当前速率   %d Mbps\n", network.Rate)
+		lines = append(lines, fmt.Sprintf("  当前速率   %d Mbps", network.Rate))
+	}
+
+	if len(lines) > 0 {
+		fmt.Println(strings.Join(lines, "\n"))
 	}
 
 	if network.Channel >= 1 && network.Channel <= 14 {
@@ -289,17 +296,14 @@ func explainLinkQuality(network *WiFiNetwork) {
 // explain24GInterference 说明 2.4GHz 的信道重叠问题：
 // 信道带宽 22 MHz 而间隔仅 5 MHz，只有 1/6/11（部分地区 1/5/9/13）互不重叠。
 func explain24GInterference(channel int) {
-	if channel == 14 {
+	switch channel {
+	case 14:
 		fmt.Printf("  注意       信道 14 仅日本法规域开放，且仅限 802.11b（DSSS），现代设备多不支持\n")
-		return
-	}
-
-	if channel == 1 || channel == 6 || channel == 11 {
+	case 1, 6, 11:
 		fmt.Printf("  干扰       信道 %d 属 1/6/11 不重叠组，邻频干扰最小\n", channel)
-		return
+	default:
+		fmt.Printf("  干扰       2.4GHz 信道间隔仅 5 MHz 而带宽 22 MHz，信道 %d 与 ±4 内信道存在频谱重叠\n", channel)
 	}
-
-	fmt.Printf("  干扰       2.4GHz 信道间隔仅 5 MHz 而带宽 22 MHz，信道 %d 与 ±4 内信道存在频谱重叠\n", channel)
 }
 
 // explainSection 输出解读区块的小标题，青色与主表格的着色系保持一致。

@@ -6,9 +6,9 @@ import (
 	"wifisec/internal/model"
 )
 
-type CommandFunction func(arguments []string) error
-
 var globalCommandRegistry = make(map[string]CommandFunction)
+
+type CommandFunction func(arguments []string) error
 
 func RegisterCommand(name string, targetFunction CommandFunction) {
 	globalCommandRegistry[name] = targetFunction

@@ -28,44 +28,6 @@ const (
 	minShrinkWidth = 8                // 可收缩列在窄终端下的最小可读宽度
 )
 
-// hardwarePort 是 networksetup 输出的一个硬件端口。
-type hardwarePort struct {
-	Port            string
-	Device          string
-	EthernetAddress string
-}
-
-// tableColumn 描述表格的一列；Color 返回空串表示该列不着色。
-// Priority 数值越大，终端过窄时越先被省略，0 为必列；
-// Shrink 标记允许截断内容兜底的列（如 ESSID）。
-type tableColumn[T any] struct {
-	Header   string
-	Value    func(T) string
-	Color    func(string) string
-	Priority int
-	Shrink   bool
-}
-
-// termuxConnectionInfo 对应 termux-wifi-connection-info 的 JSON。
-type termuxConnectionInfo struct {
-	State     string `json:"supplicant_state"`
-	BSSID     string `json:"bssid"`
-	SSID      string `json:"ssid"`
-	RSSI      int    `json:"rssi"`
-	Frequency int    `json:"frequency"`
-	Speed     int    `json:"link_speed_mbps"`
-	Error     string `json:"error"`
-}
-
-// termuxScanEntry 对应旧版 termux-wifi-scaninfo 的 JSON 数组元素。
-type termuxScanEntry struct {
-	BSSID        string `json:"bssid"`
-	SSID         string `json:"ssid"`
-	RSSI         int    `json:"level"`
-	Frequency    int    `json:"frequency"`
-	Capabilities string `json:"capabilities"`
-}
-
 var (
 	iwTypePattern      = regexp.MustCompile(`(?m)^\s*type\s+(\S+)`)
 	netshDriverPattern = regexp.MustCompile(`(?m)^\s*(?:Driver|驱动程序)\s*:\s*(.+)$`)
@@ -269,6 +231,44 @@ var networkColumns = []tableColumn[WiFiNetwork]{
 		},
 		Priority: 3,
 	},
+}
+
+// hardwarePort 是 networksetup 输出的一个硬件端口。
+type hardwarePort struct {
+	Port            string
+	Device          string
+	EthernetAddress string
+}
+
+// tableColumn 描述表格的一列；Color 返回空串表示该列不着色。
+// Priority 数值越大，终端过窄时越先被省略，0 为必列；
+// Shrink 标记允许截断内容兜底的列（如 ESSID）。
+type tableColumn[T any] struct {
+	Header   string
+	Value    func(T) string
+	Color    func(string) string
+	Priority int
+	Shrink   bool
+}
+
+// termuxConnectionInfo 对应 termux-wifi-connection-info 的 JSON。
+type termuxConnectionInfo struct {
+	State     string `json:"supplicant_state"`
+	BSSID     string `json:"bssid"`
+	SSID      string `json:"ssid"`
+	RSSI      int    `json:"rssi"`
+	Frequency int    `json:"frequency"`
+	Speed     int    `json:"link_speed_mbps"`
+	Error     string `json:"error"`
+}
+
+// termuxScanEntry 对应旧版 termux-wifi-scaninfo 的 JSON 数组元素。
+type termuxScanEntry struct {
+	BSSID        string `json:"bssid"`
+	SSID         string `json:"ssid"`
+	RSSI         int    `json:"level"`
+	Frequency    int    `json:"frequency"`
+	Capabilities string `json:"capabilities"`
 }
 
 // netshWirelessEntry 是 netsh 输出中的一个适配器。
