@@ -28,29 +28,30 @@ Sample output:
 无线接口 · 共 1 个
 PHY  接口  索引  类型     状态  MAC 地址           驱动                              芯片组
 ─────────────────────────────────────────────────────────────────────────────────────────────────────
--    en0   11    managed  UP    9c:3e:53:83:cc:87  com.apple.DriverKit-AppleBCMWLAN  (0x14E4, 0x4378)
+-    en0   11    managed  UP    00:1a:2b:3c:4d:5e  com.apple.DriverKit-AppleBCMWLAN  (0x14E4, 0x4378)
 
  CH 157 ][ Elapsed: 0 s ][ 2026-10-06 20:46:16
 
 无线网络 · 共 12 个
-连接    ESSID                  BSSID  PHY       信道  频段  带宽     加密  加密套件  认证  信号     噪声     SNR    MCS  速率
-──────────────────────────────────────────────────────────────────────────────────────────────────
-已连接  HOME@CelcomFibre_5G    -      802.11ax  157   5GHz  80 MHz   WPA2  -         PSK   -56 dBm  -91 dBm  35 dB  6    648 Mbps
+连接    ESSID            BSSID  PHY       信道  频段  带宽    加密  加密套件  认证  信号         噪声     SNR    MCS  速率
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+已连接  SkyFiber-5G      -      802.11ax  157   5GHz  80 MHz  WPA2  -         PSK   -56 dBm ▂▄▆  -91 dBm  35 dB  6    648 Mbps
+未连接  SkyFiber         -      802.11b/g/n  3  2GHz  20 MHz  WPA2  -         PSK   -53 dBm ▂▄▆  -84 dBm  31 dB  -    -
 ```
 
 ### Target lock
 
 ```bash
-make list TARGET=kelvin172
+make list TARGET=CafeGuest
 ```
 
 Equivalent to:
 
 ```bash
-go run -race cmd/main.go list kelvin172
+go run -race cmd/main.go list CafeGuest
 ```
 
-Passing an ESSID or BSSID enters lock mode: the interface table is skipped and only matching networks are shown. This mirrors the `--bssid` filter of airodump-ng.
+Passing an ESSID or BSSID enters lock mode: the interface table is skipped and only matching networks are shown. This mirrors the `--bssid` filter of airodump-ng. Note that make treats bare arguments as build targets, so always pass the value via `TARGET=`.
 
 - ESSID: exact match, case-insensitive
 - BSSID: colon separators may be omitted; `aabbccddeeff` equals `aa:bb:cc:dd:ee:ff`
@@ -63,11 +64,22 @@ Lock mode sample output:
  CH hop ][ Elapsed: 3 s ][ 2026-10-06 20:42:04
 
 无线网络 · 共 2 个
-连接    ESSID      BSSID  PHY                信道  频段  带宽     加密  加密套件  认证  信号     噪声     SNR    MCS  速率
-──────────────────────────────────────────────────────────────────────────────────────────────────
-未连接  kelvin172  -      802.11b/g/n/ac/ax  5     2GHz  20 MHz   WPA2  -         PSK   -54 dBm  -88 dBm  34 dB  -    -
-未连接  kelvin172  -      802.11a/n/ac/ax    40    5GHz  160 MHz  WPA2  -         PSK   -66 dBm  -92 dBm  26 dB  -    -
+连接    ESSID      BSSID  PHY                信道  频段  带宽     加密  加密套件  认证  信号         噪声     SNR    MCS  速率
+──────────────────────────────────────────────────────────────────────────────────────────────────────────
+未连接  CafeGuest  -      802.11b/g/n/ac/ax  5     2GHz  20 MHz   WPA2  -         PSK   -54 dBm ▂▄▆  -88 dBm  34 dB  -    -
+未连接  CafeGuest  -      802.11a/n/ac/ax    40    5GHz  160 MHz  WPA2  -         PSK   -66 dBm ▂     -92 dBm  26 dB  -    -
 ```
+
+## Terminal auto-fit
+
+Tables adapt to the actual terminal width, so neither wide desktop terminals nor narrow Termux sessions overflow horizontally:
+
+1. The terminal width is queried via `TIOCGWINSZ` (Linux / macOS / Termux);
+2. When the width is insufficient, columns are omitted by priority — a higher priority value is dropped first, `0` marks a mandatory column;
+3. If it still does not fit, the ESSID is truncated with a trailing `…` (the only shrinkable column);
+4. Output redirected to a pipe or file is treated as unlimited width, so captured data stays complete.
+
+On a 64-column terminal the interface table drops 索引 (index) and 驱动 (driver), and the network table drops cipher, auth, noise and MCS; at 52 columns the chipset, PHY, bandwidth and similar columns go next. Essential information (interface name, state, MAC, connection state, ESSID, channel, signal) is always kept.
 
 ## Output reference
 
@@ -83,38 +95,40 @@ Lock mode sample output:
 | `Elapsed: n s` | Duration of this scan in seconds |
 | Timestamp | Completion time of the scan |
 
+The whole line is rendered inverse (highlighted), the visual signature of airodump-ng.
+
 ### Wireless interface table
 
-| Column | Meaning |
-| ---- | ---- |
-| PHY | Physical device index (e.g. `phy0`); not applicable on macOS, shown as `-` |
-| 接口 (Interface) | Kernel interface name (`wlan0` / `en0` / `Wi-Fi`) |
-| 索引 (Index) | Kernel interface index |
-| 类型 (Type) | Operating mode: `managed` / `monitor` |
-| 状态 (State) | `UP` / `DOWN`, colored green and red |
-| MAC 地址 (MAC) | Hardware address; on macOS the hardware address from networksetup is preferred over the randomized private one |
-| 驱动 (Driver) | Kernel driver identifier |
-| 芯片组 (Chipset) | Hardware model (PCI ID or netsh description) |
+| Column | Meaning | Priority |
+| ---- | ---- | ---- |
+| PHY | Physical device index (e.g. `phy0`); not applicable on macOS, shown as `-` | 3 |
+| 接口 (Interface) | Kernel interface name (`wlan0` / `en0` / `Wi-Fi`) | mandatory |
+| 索引 (Index) | Kernel interface index | 4 |
+| 类型 (Type) | Operating mode: `managed` / `monitor` | 2 |
+| 状态 (State) | `UP` / `DOWN`, colored green and red | mandatory |
+| MAC 地址 (MAC) | Hardware address; on macOS the hardware address from networksetup is preferred over the randomized private one | mandatory |
+| 驱动 (Driver) | Kernel driver identifier | 5 |
+| 芯片组 (Chipset) | Hardware model (PCI ID or netsh description) | 4 |
 
 ### Wireless network table
 
-| Column | Meaning |
-| ---- | ---- |
-| 连接 (Connection) | `已连接` connected (green) / `未连接` unconnected (gray) |
-| ESSID | Network name |
-| BSSID | MAC address of the access point |
-| PHY | 802.11 generation (`802.11ax` etc.) |
-| 信道 (Channel) | Channel number |
-| 频段 (Band) | `2GHz` / `5GHz` |
-| 带宽 (Width) | Channel width (MHz) |
-| 加密 (Encryption) | `WPA2` / `WPA3` / `WPA` / `WEP` / `OPEN` |
-| 加密套件 (Cipher) | `CCMP` / `TKIP` etc. |
-| 认证 (Auth) | `PSK` / `802.1X` |
-| 信号 (Signal) | Signal strength (dBm), color coded: green ≥ −50, yellow ≥ −70, red below |
-| 噪声 (Noise) | Noise floor (dBm) |
-| SNR | Signal-to-noise ratio (dB), derived as signal minus noise |
-| MCS | Modulation and coding scheme index |
-| 速率 (Rate) | Current transfer rate (Mbps) |
+| Column | Meaning | Priority |
+| ---- | ---- | ---- |
+| 连接 (Connection) | `已连接` connected (green) / `未连接` unconnected (gray) | mandatory |
+| ESSID | Network name; may be truncated on narrow terminals | mandatory (shrinkable) |
+| BSSID | MAC address of the access point | mandatory |
+| PHY | 802.11 generation (`802.11ax` etc.) | 4 |
+| 信道 (Channel) | Channel number | mandatory |
+| 频段 (Band) | `2GHz` / `5GHz` | 3 |
+| 带宽 (Width) | Channel width (MHz) | 4 |
+| 加密 (Encryption) | `WPA2` / `WPA3` / `WPA` / `WEP` / `OPEN`; `OPEN` and `WEP` red, `WPA` yellow, `WPA3` cyan — weak encryption stands out at a glance | 1 |
+| 加密套件 (Cipher) | `CCMP` / `TKIP` etc. | 5 |
+| 认证 (Auth) | `PSK` / `802.1X` | 5 |
+| 信号 (Signal) | Signal strength (dBm) with ▂▄▆█ strength bar, color coded: green ≥ −50, yellow ≥ −70, red below | mandatory |
+| 噪声 (Noise) | Noise floor (dBm) | 5 |
+| SNR | Signal-to-noise ratio (dB), derived as signal minus noise | 4 |
+| MCS | Modulation and coding scheme index | 5 |
+| 速率 (Rate) | Current transfer rate (Mbps) | 3 |
 
 Missing fields are rendered as `-`.
 
@@ -156,3 +170,6 @@ Some system information may be trimmed without elevated privileges; sudo yields 
 
 **What do the signal colors mean?**
 Green marks strong signals above −50 dBm, yellow marks fair signals between −50 and −70 dBm, red marks weak signals below −70 dBm where link quality becomes unreliable.
+
+**Why are some columns missing on a narrow screen?**
+That is the terminal auto-fit at work: when the width is insufficient, secondary columns are omitted by priority. No data is lost — widen the window or redirect the output to a file to see the full table.

@@ -32,6 +32,8 @@ const (
 	ColorRed     = "\033[31m"
 	ColorMagenta = "\033[35m"
 	ColorWhite   = "\033[37m"
+	// ColorInverse 反显前景与背景，用于 airodump-ng 式的高亮状态栏。
+	ColorInverse = "\033[7m"
 )
 
 const (

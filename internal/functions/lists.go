@@ -14,16 +14,29 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
+	"unsafe"
 	"wifisec/internal/constants"
 	"wifisec/internal/utilities"
 )
 
 const (
-	columnGap      = 2                // 列间空格数
-	placeholder    = "-"              // 平台取不到的字段占位
+	// sysIoctl 为 ioctl 系统调用号，Linux amd64/arm64（Termux 主流环境）与 macOS 均为 54；
+	// Windows 不执行到该调用，取值无影响。
+	sysIoctl = 54
+
+	columnGap   = 2   // 列间空格数
+	placeholder = "-" // 平台取不到的字段占位
+
 	commandTimeout = 10 * time.Second // 外部命令超时
+	minShrinkWidth = 8                // 可收缩列在窄终端下的最小可读宽度
 )
+
+// winsize 对应 TIOCGWINSZ 的返回结构。
+type winsize struct {
+	rows, cols, xpixel, ypixel uint16
+}
 
 // hardwarePort 是 networksetup 输出的一个硬件端口。
 type hardwarePort struct {
@@ -33,10 +46,14 @@ type hardwarePort struct {
 }
 
 // tableColumn 描述表格的一列；Color 返回空串表示该列不着色。
+// Priority 数值越大，终端过窄时越先被省略，0 为必列；
+// Shrink 标记允许截断内容兜底的列（如 ESSID）。
 type tableColumn[T any] struct {
-	Header string
-	Value  func(T) string
-	Color  func(string) string
+	Header   string
+	Value    func(T) string
+	Color    func(string) string
+	Priority int
+	Shrink   bool
 }
 
 var (
@@ -57,6 +74,7 @@ var interfaceColumns = []tableColumn[WirelessInterface]{
 		Value: func(d WirelessInterface) string {
 			return d.PHY
 		},
+		Priority: 3,
 	},
 	{
 		Header: "接口",
@@ -69,12 +87,14 @@ var interfaceColumns = []tableColumn[WirelessInterface]{
 		Value: func(d WirelessInterface) string {
 			return number(d.Index)
 		},
+		Priority: 4,
 	},
 	{
 		Header: "类型",
 		Value: func(d WirelessInterface) string {
 			return d.Mode
 		},
+		Priority: 2,
 	},
 	{
 		Header: "状态",
@@ -94,12 +114,14 @@ var interfaceColumns = []tableColumn[WirelessInterface]{
 		Value: func(d WirelessInterface) string {
 			return d.Driver
 		},
+		Priority: 5,
 	},
 	{
 		Header: "芯片组",
 		Value: func(d WirelessInterface) string {
 			return d.Chipset
 		},
+		Priority: 4,
 	},
 }
 
@@ -116,6 +138,7 @@ var networkColumns = []tableColumn[WiFiNetwork]{
 		Value: func(n WiFiNetwork) string {
 			return n.ESSID
 		},
+		Shrink: true, // 窄终端的最后兜底：优先截断名称而不是丢列
 	},
 	{
 		Header: "BSSID",
@@ -128,6 +151,7 @@ var networkColumns = []tableColumn[WiFiNetwork]{
 		Value: func(n WiFiNetwork) string {
 			return n.PHY
 		},
+		Priority: 4,
 	},
 	{
 		Header: "信道",
@@ -140,6 +164,7 @@ var networkColumns = []tableColumn[WiFiNetwork]{
 		Value: func(n WiFiNetwork) string {
 			return n.Freq
 		},
+		Priority: 3,
 	},
 	{
 		Header: "带宽",
@@ -150,29 +175,39 @@ var networkColumns = []tableColumn[WiFiNetwork]{
 
 			return fmt.Sprintf("%d MHz", n.ChannelWidth)
 		},
+		Priority: 4,
 	},
 	{
 		Header: "加密",
 		Value: func(n WiFiNetwork) string {
 			return n.Enc
 		},
+		Color:    encryptionColor,
+		Priority: 1,
 	},
 	{
 		Header: "加密套件",
 		Value: func(n WiFiNetwork) string {
 			return n.Cipher
 		},
+		Priority: 5,
 	},
 	{
 		Header: "认证",
 		Value: func(n WiFiNetwork) string {
 			return n.Auth
 		},
+		Priority: 5,
 	},
 	{
 		Header: "信号",
 		Value: func(n WiFiNetwork) string {
-			return signalLabel(n.Signal)
+			label := signalLabel(n.Signal)
+			if label == "" {
+				return ""
+			}
+
+			return label + " " + signalBar(n.Signal)
 		},
 		Color: signalColor,
 	},
@@ -181,6 +216,7 @@ var networkColumns = []tableColumn[WiFiNetwork]{
 		Value: func(n WiFiNetwork) string {
 			return signalLabel(n.NoiseFloor)
 		},
+		Priority: 5,
 	},
 	{
 		Header: "SNR",
@@ -191,18 +227,21 @@ var networkColumns = []tableColumn[WiFiNetwork]{
 
 			return fmt.Sprintf("%d dB", n.SNR)
 		},
+		Priority: 4,
 	},
 	{
 		Header: "MCS",
 		Value: func(n WiFiNetwork) string {
 			return number(n.MCSIndex)
 		},
+		Priority: 5,
 	},
 	{
 		Header: "速率",
 		Value: func(n WiFiNetwork) string {
 			return rateLabel(n.Rate)
 		},
+		Priority: 3,
 	},
 }
 
@@ -288,7 +327,7 @@ func signalLabel(dbm int) string {
 // signalColor 按强度给信号着色，阈值沿用无线勘测的通行经验：
 // -50 dBm 以上为强信号，-70 dBm 以下连接质量已不可靠。
 func signalColor(label string) string {
-	switch dbm := atoi(strings.TrimSuffix(label, " dBm")); {
+	switch dbm := leadingInt(label); {
 	case dbm == 0:
 		return ""
 	case dbm >= -50:
@@ -297,6 +336,37 @@ func signalColor(label string) string {
 		return constants.ColorYellow
 	default:
 		return constants.ColorRed
+	}
+}
+
+// signalBar 把信号强度渲染为 ▂▄▆█ 强度条，弱网一眼可辨。
+func signalBar(dbm int) string {
+	switch {
+	case dbm >= -50:
+		return "▂▄▆█"
+	case dbm >= -60:
+		return "▂▄▆"
+	case dbm >= -67:
+		return "▂▄"
+	case dbm >= -75:
+		return "▂"
+	default:
+		return "▁"
+	}
+}
+
+// encryptionColor 按加密代际做威胁分色，弱加密目标一眼可辨：
+// OPEN 与 WEP 危险红、WPA 过渡黄、WPA3 现代青，WPA2 保持默认不抢眼。
+func encryptionColor(enc string) string {
+	switch enc {
+	case "OPEN", "WEP":
+		return constants.ColorRed
+	case "WPA":
+		return constants.ColorYellow
+	case "WPA3":
+		return constants.ColorCyan
+	default:
+		return ""
 	}
 }
 
@@ -427,13 +497,19 @@ func renderScanStatus(networks []WiFiNetwork, elapsed time.Duration) {
 		}
 	}
 
-	fmt.Printf(
-		" %sCH %s%s ][ Elapsed: %d s ][ %s%s\n\n",
-		constants.ColorCyan,
+	// 反显整行模拟 airodump-ng 的表头高亮，是扫描画面的视觉签名；
+	// 已连接时显示所在信道，否则显示 hop 表示系统在多信道间跳变扫描。
+	line := fmt.Sprintf(
+		"CH %s ][ Elapsed: %d s ][ %s",
 		channel,
-		constants.ColorReset,
 		int(elapsed.Seconds()),
 		time.Now().Format("2006-01-02 15:04:05"),
+	)
+
+	fmt.Printf(
+		"\n %s%s%s\n\n",
+		constants.ColorInverse,
+		line,
 		constants.ColorReset,
 	)
 }
@@ -1044,20 +1120,36 @@ func stateColor(state string) string {
 	}
 }
 
-// renderTable 输出带标题的等宽表格。
-func renderTable[T any](title string, columns []tableColumn[T], items []T) {
-	headers := make([]string, len(columns))
-	widths := make([]int, len(columns))
-	for index, column := range columns {
-		headers[index] = column.Header
-		widths[index] = cellWidth(column.Header)
+// terminalWidth 查询终端列数，供表格自适应。
+// 非终端输出（管道、日志捕获）或查询失败返回 0 表示不限宽，
+// 保证落盘与重定向场景的数据完整性；Windows 暂不查询，同样不限宽。
+func terminalWidth() int {
+	switch utilities.GetOS() {
+	case utilities.Linux, utilities.Darwin, utilities.Android:
+	default:
+		return 0
 	}
 
+	// TIOCGWINSZ 的请求码按平台区分：Linux 为 0x5413，macOS 为 0x40087468。
+	request := uintptr(0x5413)
+	if utilities.GetOS() == utilities.Darwin {
+		request = 0x40087468
+	}
+
+	var size winsize
+	_, _, errno := syscall.Syscall(sysIoctl, uintptr(syscall.Stdout), request, uintptr(unsafe.Pointer(&size)))
+	if errno != 0 || size.cols == 0 {
+		return 0
+	}
+
+	return int(size.cols)
+}
+
+// renderTable 输出带标题的等宽表格；终端过窄时按列优先级自动省略次要列。
+func renderTable[T any](title string, columns []tableColumn[T], items []T) {
 	rows := make([][]string, 0, len(items))
-	rowColors := make([][]string, 0, len(items))
 	for _, item := range items {
 		cells := make([]string, len(columns))
-		colors := make([]string, len(columns))
 		for index, column := range columns {
 			value := column.Value(item)
 			if value == "" {
@@ -1065,15 +1157,36 @@ func renderTable[T any](title string, columns []tableColumn[T], items []T) {
 			}
 
 			cells[index] = value
-			if width := cellWidth(value); width > widths[index] {
-				widths[index] = width
-			}
-			if column.Color != nil {
-				colors[index] = column.Color(value)
-			}
 		}
 
 		rows = append(rows, cells)
+	}
+
+	keep := fitColumns(columns, rows, terminalWidth())
+
+	headers := make([]string, len(keep))
+	widths := make([]int, len(keep))
+	for pos, index := range keep {
+		headers[pos] = columns[index].Header
+		widths[pos] = cellWidth(columns[index].Header)
+	}
+
+	shown := make([][]string, 0, len(rows))
+	rowColors := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		cells := make([]string, len(keep))
+		colors := make([]string, len(keep))
+		for pos, index := range keep {
+			cells[pos] = row[index]
+			if width := cellWidth(cells[pos]); width > widths[pos] {
+				widths[pos] = width
+			}
+			if columns[index].Color != nil {
+				colors[pos] = columns[index].Color(cells[pos])
+			}
+		}
+
+		shown = append(shown, cells)
 		rowColors = append(rowColors, colors)
 	}
 
@@ -1098,9 +1211,108 @@ func renderTable[T any](title string, columns []tableColumn[T], items []T) {
 		constants.ColorReset,
 	)
 
-	for index, row := range rows {
+	for index, row := range shown {
 		fmt.Println(formatRow(row, widths, rowColors[index]))
 	}
+}
+
+// fitColumns 依据终端宽度决定保留哪些列：先省略优先级数值大的列，
+// 仍放不下再截断标记为 Shrink 的列（如 ESSID）。width 非正表示不限宽。
+// 截断会直接改写 rows 中的单元格，调用方此后只渲染 keep 涉及的列。
+func fitColumns[T any](columns []tableColumn[T], rows [][]string, width int) []int {
+	keep := make([]int, len(columns))
+	for index := range keep {
+		keep[index] = index
+	}
+
+	if width <= 0 {
+		return keep
+	}
+
+	widths := make([]int, len(columns))
+	for index, column := range columns {
+		widths[index] = cellWidth(column.Header)
+		for _, row := range rows {
+			if current := cellWidth(row[index]); current > widths[index] {
+				widths[index] = current
+			}
+		}
+	}
+
+	total := tableWidth(widths)
+	for total > width {
+		drop := -1
+		for _, index := range keep {
+			if columns[index].Priority > 0 && (drop == -1 || columns[index].Priority > columns[drop].Priority) {
+				drop = index
+			}
+		}
+		if drop == -1 {
+			break // 剩余均为必要列，交由可收缩列截断兜底
+		}
+
+		total -= widths[drop] + columnGap
+		for pos, index := range keep {
+			if index == drop {
+				keep = append(keep[:pos], keep[pos+1:]...)
+				break
+			}
+		}
+	}
+
+	if total <= width {
+		return keep
+	}
+
+	// 截断预算：扣除必要列宽与列间距后，剩余宽度平分给可收缩列。
+	fixed, shrinkCount := 0, 0
+	for _, index := range keep {
+		if columns[index].Shrink {
+			shrinkCount++
+			continue
+		}
+
+		fixed += widths[index]
+	}
+
+	limit := (width - fixed - columnGap*(len(keep)-1)) / max(shrinkCount, 1)
+	if shrinkCount == 0 || limit < minShrinkWidth {
+		return keep // 空间过窄时放弃截断，避免名称不可读
+	}
+
+	for _, index := range keep {
+		if !columns[index].Shrink {
+			continue
+		}
+
+		for _, row := range rows {
+			row[index] = truncateCell(row[index], limit)
+		}
+	}
+
+	return keep
+}
+
+// truncateCell 把文本截断到指定显示宽度，超出部分以 … 结尾。
+func truncateCell(text string, maxWidth int) string {
+	if cellWidth(text) <= maxWidth {
+		return text
+	}
+
+	width := 0
+	for index, current := range text {
+		unit := 1
+		if isWideRune(current) {
+			unit = 2
+		}
+		if width+unit > maxWidth-1 { // 预留结尾 … 的宽度
+			return text[:index] + "…"
+		}
+
+		width += unit
+	}
+
+	return text
 }
 
 // tableWidth 计算整行的显示宽度。
