@@ -1,5 +1,9 @@
 package functions
 
+import (
+	"wifisec/internal/security"
+)
+
 type WiFiNetwork struct {
 	Id      int    `json:"id"`      // 网络ID
 	BSSID   string `json:"bssid"`   // AP 的 MAC 地址
@@ -15,5 +19,15 @@ type WiFiNetwork struct {
 }
 
 func WifiList(arguments []string) error {
+	var (
+		checker security.PrivilegeChecker = security.RootChecker{}
+		err                               = checker.Check()
+		// networks []WiFiNetwork
+	)
+
+	if err != nil {
+		return err
+	}
+
 	return nil
 }

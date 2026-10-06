@@ -1,4 +1,4 @@
-.PHONY: run build clean tidy format test
+.PHONY: run build clean tidy format test list
 
 MAIN_PATH := cmd/main.go
 APP_NAME := wifisec
@@ -25,3 +25,7 @@ format:
 test:
 	@echo "正在运行测试..."
 	go test ./...
+
+list:
+	@echo "正在列出WiFi网络..."
+	go run -race $(MAIN_PATH) list
