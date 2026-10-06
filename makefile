@@ -1,6 +1,7 @@
 .PHONY: run build clean tidy format test list help
 
 MAIN_PATH := cmd/main.go
+BUILD_PATH := build
 APP_NAME := wifisec
 
 run:
@@ -9,11 +10,11 @@ run:
 
 build:
 	@echo "正在编译二进制文件..."
-	go build -o build/$(APP_NAME) $(MAIN_PATH)
+	go build -o $(BUILD_PATH)/$(APP_NAME) $(MAIN_PATH)
 
 clean:
 	@echo "正在清理编译产物..."
-	rm -rf bin/
+	rm -rf $(BUILD_PATH)/$(APP_NAME)
 
 tidy:
 	go mod tidy

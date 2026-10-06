@@ -74,7 +74,7 @@ go run -race cmd/main.go list CafeGuest
 
 表格按终端实际列宽自动调整，PC 大屏与 Termux 窄屏均不横向溢出：
 
-1. 通过 `TIOCGWINSZ` 查询终端列数（Linux / macOS / Termux）；
+1. Unix（Linux / macOS / Termux）经 `TIOCGWINSZ`、Windows 经 `GetConsoleScreenBufferInfo` 查询终端列数；
 2. 宽度不足时按列优先级省略次要列——优先级数值越大越先省略，`0` 为必列；
 3. 仍放不下时截断 ESSID 并以 `…` 结尾（唯一允许收缩的列）；
 4. 输出被重定向或管道捕获时视为不限宽，落盘数据保持完整。
@@ -134,28 +134,41 @@ go run -race cmd/main.go list CafeGuest
 
 ## 平台实现
 
-| 平台 | 接口枚举 | 网络扫描 | 备注 |
-| ---- | ---- | ---- | ---- |
-| macOS | `networksetup -listallhardwareports` + `net.Interfaces` | `system_profiler SPAirPortDataType`（文本模式，`LC_ALL=C` 固定英文） | 驱动经 ioreg IORegistry 定位；JSON 输出不含 SSID，故走文本解析 |
-| Linux | `/proc/net/wireless` + sysfs + `iw dev <iface> info` | 暂未实现 | Termux 环境不调用 iw，接口名按前缀兜底识别 |
-| Windows | `netsh wlan show interfaces` / `show drivers` | 暂未实现 | netsh 输出随系统语言变化，键名中英文兼容 |
-| Android (Termux) | `/proc/net/wireless` | 暂未实现 | 无 root 时数据有限 |
+| 平台 | 接口枚举 | 网络扫描 | BSSID | 备注 |
+| ---- | ---- | ---- | ---- | ---- |
+| macOS | `networksetup -listallhardwareports` + `net.Interfaces` | `system_profiler SPAirPortDataType`（文本模式，`LC_ALL=C` 固定英文） | 仅 root 下经 `wdutil info` 补已连接网络 | 驱动经 ioreg IORegistry 定位；周边网络 BSSID 被系统隐私框架封禁 |
+| Linux | `/proc/net/wireless` + sysfs + `iw dev <iface> info` | `iw dev <iface> scan`（需 root） | 每个 BSS 真实 BSSID | 已连接标记来自无需 root 的 `iw dev <iface> link` |
+| Windows | `netsh wlan show interfaces` / `show drivers` | `netsh wlan show networks mode=bssid`（无需管理员） | 每个 BSSID 真实 BSSID | 键名中英文兼容；信号由百分比线性换算 dBm |
+| Android (Termux) | `/proc/net/wireless` | `termux-wifi-connection-info`，旧版额外尝试 `termux-wifi-scaninfo` | 已连接网络真实 BSSID；周边列表取决于系统是否放行 | 需安装 Termux:API 应用与 `termux-api` 包 |
 
-macOS 的 profiler 解析采用相对缩进而非写死层级，避免不同 macOS 版本或权限下的排版差异导致漏读；同一网络同时出现在「当前网络」与「其他网络」时按 ESSID + 信道去重，保留带已连接标记的那条。
+解析器均为纯函数（`ParseIWScanOutput` / `ParseNetshBSSIDOutput`），接收命令原始文本返回结构体切片，外部命令调用与文本解析严格分离，表驱动测试覆盖 WPA2/WPA3/WEP/开放、隐藏 SSID、双 BSSID 拆分与中文系统键名。
+
+macOS 的 profiler 解析采用相对缩进而非写死层级，避免不同 macOS 版本或权限下的排版差异导致漏读；同一网络同时出现在「当前网络」与「其他网络」时按 ESSID + 信道去重，保留带已连接标记的那条。Linux 与 Windows 每个 BSSID 天然唯一，不去重。
+
+### 各平台字段覆盖
+
+| 字段 | macOS | Linux | Windows | Termux |
+| ---- | ---- | ---- | ---- | ---- |
+| BSSID | 仅已连接（root） | 全部 | 全部 | 仅已连接 |
+| 加密套件 / 认证 | `-` | RSN/WPA IE 明细 | netsh 认证/加密字段 | capabilities 串解析 |
+| 信道带宽 | 有 | VHT/HE/HT 推导 | `-` | `-` |
+| 噪声 / SNR / MCS / 速率 | 仅已连接 | `-`（beacon 不提供） | `-` | 速率（连接信息） |
 
 ## 平台限制
 
-macOS 由系统不提供以下数据，表中显示 `-`：
+**macOS** 自 14 起将 SSID/BSSID 读取纳入定位服务授权，授权只授予带签名的图形 App，命令行工具（含 sudo，root 没有用户定位上下文）拿到的周边扫描结果中 SSID/BSSID 均为空。因此未连接网络的 BSSID 与加密套件在 macOS 上必然显示 `-`，这不是程序缺陷；唯一例外是 root 下 `wdutil info` 可提供当前已连接 AP 的 BSSID。
 
 | 字段 | 原因 |
 | ---- | ---- |
-| BSSID | profiler 不输出 |
+| 未连接网络 BSSID | macOS 隐私框架不对 CLI 暴露（CoreWLAN / system_profiler 均不提供） |
 | 加密套件 | profiler 只报告加密代际，不含套件明细 |
 | 未连接网络的噪声 / SNR / MCS / 速率 | 链路质量数据仅对已连接网络提供 |
 
-BSSID 与加密套件待 Linux（`iw scan`）与 Windows（`netsh wlan show networks mode=bssid`）扫描实现后自然补齐。
+**Linux** 主动扫描（`iw scan`）需要 `CAP_NET_ADMIN`，普通用户执行会收到 `扫描需要 root 权限：请使用 sudo 运行，例如 sudo make list` 的提示。
 
-Wi-Fi 处于关闭状态时，profiler 会省略全部 SSID，程序以警告提示 `未扫描到无线网络，请确认 Wi-Fi 已开启`。
+**Android** 从 9 起对周边扫描结果实施限流与权限封禁，多数设备上 `termux-wifi-scaninfo` 直接失败；此时只显示当前已连接网络。未安装 Termux:API 时会给出明确的安装指引，不会伪造数据。
+
+Wi-Fi 处于关闭状态时，macOS profiler 会省略全部 SSID，程序以警告提示 `未扫描到无线网络，请确认 Wi-Fi 已开启`。
 
 ## 常见问题
 
@@ -163,13 +176,19 @@ Wi-Fi 处于关闭状态时，profiler 会省略全部 SSID，程序以警告提
 macOS 没有 Linux 的 `phyN` 命名，该列仅 Linux 系填充。
 
 **为什么同一个 ESSID 出现两次？**
-2.4 GHz 与 5 GHz 是同一 SSID 的两个 BSS，各自独立成行。
+2.4 GHz 与 5 GHz 是同一 SSID 的两个 BSS，各自独立成行；Linux/Windows 下它们还会显示各自不同的真实 BSSID。
 
-**`sudo make list` 有什么不同？**
-部分系统信息在非特权模式下可能被裁剪，sudo 可获得更完整的数据。
+**Linux 下提示需要 root？**
+`iw scan` 是主动扫描，必须有 root 或 `CAP_NET_ADMIN`：用 `sudo make list` 运行。已连接网络的关联信息（`iw link`）不需要特权。
+
+**macOS 用 sudo 能看到全部 BSSID 吗？**
+不能。sudo 只能通过 `wdutil info` 补出当前已连接 AP 的 BSSID；周边网络 BSSID 被系统隐私框架封禁，任何命令行工具都拿不到。需要完整 BSSID 列表请在 Linux 或 Windows 上运行。
+
+**Termux 下只显示一个网络？**
+Android 9+ 默认封禁周边扫描，只能读取当前连接信息。请确认已安装 Termux:API 应用、执行过 `pkg install termux-api` 并授予位置权限。
 
 **信号列的颜色代表什么？**
 绿色表示 −50 dBm 以上的强信号，黄色为 −50 至 −70 dBm 的中等信号，红色表示 −70 dBm 以下的弱信号，连接质量已不可靠。
 
 **为什么窄屏下少了几列？**
-终端自适应在起作用：宽度不足时按优先级省略次要列，数据并未丢失，放大窗口或重定向到文件即可看到完整表格。
+终端自适应在起作用：Unix 经 `TIOCGWINSZ`、Windows 经 `GetConsoleScreenBufferInfo` 读取列宽，宽度不足时按优先级省略次要列，数据并未丢失，放大窗口或重定向到文件即可看到完整表格。

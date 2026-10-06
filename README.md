@@ -14,6 +14,4 @@ make test    # 运行测试
 
 | 命令 | 功能 | 文档 |
 | ---- | ---- | ---- |
-| `list` | 无线接口枚举与周边网络扫描 | [中文](docs/feature/zh/wifi_list.md) · [English](docs/feature/en/wifi_list.md) · [Deutsch](docs/feature/de/wifi_list.md) |
-
-其余语言索引：[English](docs/README_EN.md) · [Deutsch](docs/README_DE.md)
+| `list` | 无线接口枚举与周边网络扫描 | [wifi_list.md](docs/feature/wifi_list.md) |

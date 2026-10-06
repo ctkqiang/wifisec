@@ -3,6 +3,8 @@ package functions
 import (
 	"bytes"
 	"context"
+
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -14,29 +16,18 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
-	"unsafe"
 	"wifisec/internal/constants"
 	"wifisec/internal/utilities"
 )
 
 const (
-	// sysIoctl 为 ioctl 系统调用号，Linux amd64/arm64（Termux 主流环境）与 macOS 均为 54；
-	// Windows 不执行到该调用，取值无影响。
-	sysIoctl = 54
-
 	columnGap   = 2   // 列间空格数
 	placeholder = "-" // 平台取不到的字段占位
 
 	commandTimeout = 10 * time.Second // 外部命令超时
 	minShrinkWidth = 8                // 可收缩列在窄终端下的最小可读宽度
 )
-
-// winsize 对应 TIOCGWINSZ 的返回结构。
-type winsize struct {
-	rows, cols, xpixel, ypixel uint16
-}
 
 // hardwarePort 是 networksetup 输出的一个硬件端口。
 type hardwarePort struct {
@@ -63,6 +54,22 @@ var (
 	driverIDPattern    = regexp.MustCompile(`"(?:CFBundleIdentifier|IOPersonalityPublisher)"\s*=\s*"([^"]+)"`)
 	channelPattern     = regexp.MustCompile(`(\d+)\s*\((\d+GHz)(?:,\s*(\d+)MHz)?`)
 	intPattern         = regexp.MustCompile(`(-?\d+)`)
+
+	// Linux iw scan 输出解析。
+	iwBSSPattern     = regexp.MustCompile(`^BSS ([0-9a-fA-F:]{17})\(`)
+	iwFreqPattern    = regexp.MustCompile(`\bfreq: (\d+)`)
+	iwSignalPattern  = regexp.MustCompile(`signal: (-?\d+)`)
+	iwSSIDPattern    = regexp.MustCompile(`SSID:\s?(.*)$`)
+	iwChannelPattern = regexp.MustCompile(`DS Parameter set: channel (\d+)`)
+	iwSuitePattern   = regexp.MustCompile(`\* (Group cipher|Pairwise ciphers|Authentication suites): (.+)$`)
+	iwWidthPattern   = regexp.MustCompile(`\* channel width: (\d+)(?:\s+\(([^)]+)\))?`)
+	iwLinkPattern    = regexp.MustCompile(`Connected to ([0-9a-fA-F:]{17})`)
+
+	// Windows netsh mode=bssid 输出解析（键名兼容中英文系统语言）。
+	netshSSIDPattern  = regexp.MustCompile(`^SSID \d+\s*:\s*(.*)$`)
+	netshBSSIDPattern = regexp.MustCompile(`^BSSID \d+\s*:\s*([0-9a-fA-F:]{17})`)
+	netshMACPattern   = regexp.MustCompile(`BSSID\s*:\s*([0-9a-fA-F:]{17})`)
+	netshIntPattern   = regexp.MustCompile(`(-?\d+)`)
 
 	// 无法读取 /proc/net/wireless 时，按常见无线接口名前缀兜底识别。
 	namePrefixes = []string{"wlan", "wlp", "wlx", "wl", "ath", "ra"}
@@ -300,15 +307,15 @@ func number(value int) string {
 // connLabel 标记网络是否为当前连接。
 func connLabel(network WiFiNetwork) string {
 	if network.Connected {
-		return "已连接"
+		return "【已连接】"
 	}
 
-	return "未连接"
+	return "【未连接】"
 }
 
 // connColor 让已连接的网络突出显示。
 func connColor(label string) string {
-	if label == "已连接" {
+	if label == "【已连接】" {
 		return constants.ColorGreen
 	}
 
@@ -404,7 +411,13 @@ func WifiList(arguments []string) error {
 	}
 
 	started := time.Now()
-	networks := scanNetworks()
+	networks, err := scanNetworks()
+	if err != nil {
+		// 各平台权限/能力差异较大，错误信息由扫描器给出可直接执行的建议。
+		utilities.Warn("%s", err)
+		return nil
+	}
+
 	if len(networks) == 0 {
 		// macOS 在 Wi-Fi 关闭时会省略 SSID，导致扫不到可命名的网络。
 		utilities.Warn("未扫描到无线网络，请确认 Wi-Fi 已开启")
@@ -428,13 +441,703 @@ func WifiList(arguments []string) error {
 }
 
 // scanNetworks 扫描周边网络；已连接的网络也在结果中并带标记。
-func scanNetworks() []WiFiNetwork {
-	switch utilities.GetOS() {
-	case utilities.Darwin:
+// 各平台数据源不同：Linux 用 iw、Windows 用 netsh、macOS 用 system_profiler，
+// Termux 只能走 termux-api。返回的错误用于给出平台对应的操作建议。
+func scanNetworks() ([]WiFiNetwork, error) {
+	switch {
+	case utilities.GetOS() == utilities.Darwin:
 		_, networks := parseMacOSProfile(macOSProfile())
-		return dedupeNetworks(networks)
+		enrichMacOSConnectedBSSID(networks)
+		return dedupeNetworks(networks), nil
+	case utilities.GetOS() == utilities.Windows:
+		return scanWindowsNetworks()
+	case isTermux():
+		// Termux 里 go build 的 runtime.GOOS 仍是 linux，必须在纯 Linux 分支前识别。
+		return scanTermuxNetworks()
+	case utilities.GetOS() == utilities.Linux:
+		return scanLinuxNetworks()
 	default:
-		return nil
+		return nil, fmt.Errorf("当前平台 %s 暂不支持无线网络扫描", utilities.GetOS())
+	}
+}
+
+// isTermux 判断是否运行于 Android Termux：官方 GOOS=android 构建，
+// 或环境带有 Termux 标记（PREFIX / TERMUX_VERSION），或安装了 termux-api 命令。
+func isTermux() bool {
+	if utilities.GetOS() == utilities.Android {
+		return true
+	}
+
+	if strings.Contains(os.Getenv("PREFIX"), "com.termux") || os.Getenv("TERMUX_VERSION") != "" {
+		return true
+	}
+
+	_, err := exec.LookPath("termux-wifi-connection-info")
+	return err == nil
+}
+
+// markConnectedBSSID 按 BSSID 标记当前已连接的网络；BSSID 缺失时不做处理。
+func markConnectedBSSID(networks []WiFiNetwork, bssid string) {
+	bssid = normalizeMAC(bssid)
+	if bssid == "" {
+		return
+	}
+
+	for i := range networks {
+		if normalizeMAC(networks[i].BSSID) == bssid {
+			networks[i].Connected = true
+		}
+	}
+}
+
+// freqToChannel 按 802.11 信道编号与中心频率的固定关系换算；
+// 2.4GHz：ch1=2412，每信道 +5；5GHz：ch36=5180，每信道 +5。
+func freqToChannel(freq int) int {
+	switch {
+	case freq == 2484:
+		return 14
+	case freq >= 2412 && freq <= 2472:
+		return (freq - 2407) / 5
+	case freq >= 5000 && freq < 6000:
+		return (freq - 5000) / 5
+	default:
+		return 0
+	}
+}
+
+// bandLabel 按中心频率标注频段，与 macOS 解析结果保持同一套取值。
+func bandLabel(freq int) string {
+	switch {
+	case freq >= 2400 && freq < 2500:
+		return "2GHz"
+	case freq >= 4900 && freq < 6000:
+		return "5GHz"
+	default:
+		return ""
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Linux：iw 主动扫描（每个 BSS 提供真实 BSSID、RSN 套件、信道带宽）
+// ---------------------------------------------------------------------------
+
+// scanLinuxNetworks 调用 iw 扫描周边网络。主动扫描需要 CAP_NET_ADMIN，
+// 未授权时内核返回 Operation not permitted，此时提示用户改用 sudo。
+func scanLinuxNetworks() ([]WiFiNetwork, error) {
+	iface, err := FindWirelessInterface()
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := exec.LookPath("iw"); err != nil {
+		return nil, errors.New("未找到 iw 命令，请先安装发行版的 iw 包（如 apt install iw）")
+	}
+
+	// iw scan 会逐信道主动探测，耗时数秒，单独放宽到 30 秒。
+	output, err := runCommandWithTimeout(30*time.Second, "iw", "dev", iface.Name, "scan")
+	if err != nil {
+		detail := err.Error()
+		if strings.Contains(detail, "Operation not permitted") || strings.Contains(detail, "permission denied") {
+			return nil, errors.New("扫描需要 root 权限：请使用 sudo 运行，例如 sudo make list")
+		}
+
+		return nil, fmt.Errorf("iw 扫描失败：%w", err)
+	}
+
+	networks := ParseIWScanOutput(output, iface.Name)
+
+	// iw link 不需要 root，用它识别当前关联的 BSSID；未连接时静默跳过。
+	if link, linkErr := runCommand("iw", "dev", iface.Name, "link"); linkErr == nil {
+		if match := iwLinkPattern.FindStringSubmatch(link); match != nil {
+			markConnectedBSSID(networks, match[1])
+		}
+	}
+
+	return networks, nil
+}
+
+// ParseIWScanOutput 解析 `iw dev <iface> scan` 的逐 BSS 文本块。
+// 每个 “BSS xx(on …)” 开头的块对应一个真实 AP，因此结果不做去重。
+func ParseIWScanOutput(output, device string) []WiFiNetwork {
+	networks := make([]WiFiNetwork, 0)
+
+	var current *WiFiNetwork
+
+	// 套件区块状态：RSN/WPA 的子行没有所属标记，只能靠“上一区块头”定位。
+	var section string
+	var rsnGroup, rsnPairwise, rsnAKM string
+	var wpaGroup, wpaPairwise, wpaAKM string
+	var hasRSN, hasWPA bool
+
+	var hasHT, hasVHT, hasHE, hasEHT bool
+	var htSecondary string
+	var widthCode int
+	var widthText string
+
+	flush := func() {
+		if current == nil {
+			return
+		}
+
+		finalizeIWSecurity(current, hasRSN, rsnGroup, rsnPairwise, rsnAKM,
+			hasWPA, wpaGroup, wpaPairwise, wpaAKM)
+		current.PHY = buildIWPHY(current.Freq, hasHT, hasVHT, hasHE, hasEHT)
+		current.ChannelWidth = resolveIWWidth(hasHT, htSecondary, widthCode, widthText)
+		if current.Channel == 0 {
+			current.Channel = freqToChannel(atoi(current.Freq))
+		}
+		current.Freq = bandLabel(atoi(current.Freq))
+
+		networks = append(networks, *current)
+	}
+
+	for _, line := range strings.Split(output, "\n") {
+		if match := iwBSSPattern.FindStringSubmatch(line); match != nil {
+			flush()
+			current = &WiFiNetwork{BSSID: normalizeMAC(match[1]), Device: device}
+			section = ""
+			hasRSN, hasWPA = false, false
+			rsnGroup, rsnPairwise, rsnAKM = "", "", ""
+			wpaGroup, wpaPairwise, wpaAKM = "", "", ""
+			hasHT, hasVHT, hasHE, hasEHT = false, false, false, false
+			htSecondary, widthText = "", ""
+			widthCode = 0
+			continue
+		}
+
+		if current == nil {
+			continue
+		}
+
+		trimmed := strings.TrimSpace(line)
+
+		// RSN/WPA 区块头及其子行都带 “*”；遇到普通字段行即视为区块结束。
+		if strings.HasPrefix(trimmed, "RSN:") {
+			section, hasRSN = "rsn", true
+		} else if strings.HasPrefix(trimmed, "WPA:") {
+			section, hasWPA = "wpa", true
+		} else if !strings.Contains(line, "*") {
+			section = ""
+		}
+
+		if match := iwSuitePattern.FindStringSubmatch(trimmed); match != nil {
+			kind, values := match[1], strings.Fields(match[2])
+			value := ""
+			if len(values) > 0 {
+				value = values[0]
+			}
+
+			switch kind {
+			case "Group cipher":
+				if section == "rsn" {
+					rsnGroup = value
+				} else if section == "wpa" {
+					wpaGroup = value
+				}
+			case "Pairwise ciphers":
+				if section == "rsn" {
+					rsnPairwise = value
+				} else if section == "wpa" {
+					wpaPairwise = value
+				}
+			case "Authentication suites":
+				if section == "rsn" {
+					rsnAKM = strings.Join(values, " ")
+				} else if section == "wpa" {
+					wpaAKM = strings.Join(values, " ")
+				}
+			}
+		}
+
+		if strings.HasPrefix(trimmed, "freq:") {
+			if m := iwFreqPattern.FindStringSubmatch(line); m != nil {
+				current.Freq = m[1]
+			}
+		} else if strings.HasPrefix(trimmed, "signal:") {
+			if m := iwSignalPattern.FindStringSubmatch(line); m != nil {
+				current.Signal = atoi(m[1])
+			}
+		} else if strings.HasPrefix(trimmed, "SSID:") {
+			if m := iwSSIDPattern.FindStringSubmatch(line); m != nil {
+				current.ESSID = strings.TrimSpace(m[1])
+				// 隐藏网络的 SSID IE 长度为 0，iw 打印为空行。
+				if current.ESSID == "" {
+					current.ESSID = "<hidden>"
+				}
+			}
+		} else if strings.HasPrefix(trimmed, "DS Parameter set:") {
+			if m := iwChannelPattern.FindStringSubmatch(line); m != nil {
+				current.Channel = atoi(m[1])
+			}
+		} else if strings.HasPrefix(trimmed, "capability:") {
+			if !strings.Contains(trimmed, "Privacy") {
+				current.Enc = "OPEN"
+			}
+		}
+
+		switch trimmed {
+		case "HT capabilities:":
+			hasHT = true
+		case "VHT capabilities:":
+			hasVHT = true
+		case "HE:":
+			hasHE = true
+		case "EHT:":
+			hasEHT = true
+		}
+
+		if strings.Contains(trimmed, "secondary channel offset:") {
+			switch {
+			case strings.Contains(trimmed, "above"), strings.Contains(trimmed, "below"):
+				htSecondary = "secondary"
+			default:
+				htSecondary = "none"
+			}
+		}
+
+		if m := iwWidthPattern.FindStringSubmatch(trimmed); m != nil {
+			widthCode = atoi(m[1])
+			widthText = m[2]
+		}
+	}
+
+	flush()
+
+	return networks
+}
+
+// finalizeIWSecurity 根据 RSN/WPA IE 与 capability Privacy 位综合判定安全信息。
+// 判定顺序固定：OWE/SAE 属 WPA3；其次 WPA2(WPA2 转 RSN)、WPA1(厂商 IE)、WEP、开放。
+func finalizeIWSecurity(network *WiFiNetwork, hasRSN bool, rsnGroup, rsnPairwise, rsnAKM string,
+	hasWPA bool, wpaGroup, wpaPairwise, wpaAKM string,
+) {
+	switch {
+	case hasRSN && (strings.Contains(rsnAKM, "OWE")):
+		network.Enc, network.Auth = "OWE", "OWE"
+	case hasRSN && (strings.Contains(rsnAKM, "SAE") || strings.Contains(rsnAKM, "EAP-SHA256")):
+		network.Enc = "WPA3"
+		network.Auth = mapIWAKM(rsnAKM)
+		network.Cipher = mapIWCipher(firstNonEmpty(rsnPairwise, rsnGroup))
+	case hasRSN:
+		network.Enc = "WPA2"
+		network.Auth = mapIWAKM(rsnAKM)
+		network.Cipher = mapIWCipher(firstNonEmpty(rsnPairwise, rsnGroup))
+	case hasWPA:
+		network.Enc = "WPA"
+		network.Auth = mapIWAKM(wpaAKM)
+		network.Cipher = mapIWCipher(firstNonEmpty(wpaPairwise, wpaGroup))
+	default:
+		// 无任何安全 IE 但帧带 Privacy 位，是 WEP 网络的典型特征。
+		if network.Enc != "OPEN" {
+			network.Enc, network.Cipher = "WEP", "WEP"
+		}
+	}
+}
+
+// mapIWAKM 把 iw 的 AKM 套件描述归一化为表格里的认证标签。
+func mapIWAKM(suites string) string {
+	switch {
+	case strings.Contains(suites, "SAE"):
+		return "SAE"
+	case strings.Contains(suites, "802.1X"), strings.Contains(suites, "EAP"):
+		return "802.1X"
+	case strings.Contains(suites, "PSK"):
+		return "PSK"
+	default:
+		return ""
+	}
+}
+
+// mapIWCipher 归一化 iw 的密码套件名称。
+func mapIWCipher(suite string) string {
+	switch {
+	case strings.Contains(suite, "GCMP"):
+		return "GCMP"
+	case strings.Contains(suite, "CCMP"):
+		return "CCMP"
+	case strings.Contains(suite, "TKIP"):
+		return "TKIP"
+	case strings.Contains(suite, "WEP"):
+		return "WEP"
+	default:
+		return ""
+	}
+}
+
+// firstNonEmpty 返回第一个非空串。
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+
+	return ""
+}
+
+// buildIWPHY 按能力 IE 组合 PHY 标签，风格对齐 macOS profiler：
+// 5GHz 以 802.11a 起步，2.4GHz 以 802.11b/g 起步，逐级追加 /n /ac /ax /be。
+func buildIWPHY(freqField string, hasHT, hasVHT, hasHE, hasEHT bool) string {
+	freq := atoi(freqField)
+	phy := "802.11b/g"
+	if freq >= 4900 {
+		phy = "802.11a"
+	}
+
+	if hasHT {
+		phy += "/n"
+	}
+	if hasVHT {
+		phy += "/ac"
+	}
+	if hasHE {
+		phy += "/ax"
+	}
+	if hasEHT {
+		phy += "/be"
+	}
+
+	return phy
+}
+
+// resolveIWWidth 解析 VHT/HE operation 的带宽。
+// iw 在括号内直接给出 MHz（80 MHz / 160 MHz / 80+80 MHz）；
+// 无 VHT 时退化为 HT 副信道判断：有偏移即 40MHz，否则 20MHz。
+func resolveIWWidth(hasHT bool, htSecondary string, code int, text string) int {
+	if text != "" {
+		width := atoi(text)
+		if width > 0 {
+			return width
+		}
+	}
+
+	// 80+80 MHz 不含独立数字时按 160MHz 呈现。
+	if strings.Contains(text, "80+80") {
+		return 160
+	}
+
+	switch code {
+	case 1:
+		return 80
+	case 2, 3:
+		return 160
+	}
+
+	if hasHT {
+		if htSecondary == "secondary" {
+			return 40
+		}
+		return 20
+	}
+
+	return 0
+}
+
+// ---------------------------------------------------------------------------
+// Windows：netsh 枚举（同一 SSID 的每个 BSSID 单独成行，提供真实 BSSID）
+// ---------------------------------------------------------------------------
+
+// scanWindowsNetworks 通过 netsh 扫描。netsh 无需管理员权限即可列出周边 BSS。
+func scanWindowsNetworks() ([]WiFiNetwork, error) {
+	output, err := runCommand("netsh", "wlan", "show", "networks", "mode=bssid")
+	if err != nil {
+		return nil, fmt.Errorf("netsh 扫描失败：%w", err)
+	}
+
+	networks := ParseNetshBSSIDOutput(output)
+
+	// show interfaces 给出当前关联的 BSSID；未连接或没有活动接口时静默跳过。
+	if ifaceOutput, ifaceErr := runCommand("netsh", "wlan", "show", "interfaces"); ifaceErr == nil {
+		if match := netshMACPattern.FindStringSubmatch(ifaceOutput); match != nil {
+			markConnectedBSSID(networks, match[1])
+		}
+	}
+
+	return networks, nil
+}
+
+// ParseNetshBSSIDOutput 解析 `netsh wlan show networks mode=bssid` 文本。
+// SSID 段头位于行首、认证/加密缩进 4 列、BSSID 及其属性缩进更深，
+// 利用缩进层级把每个 BSSID 拆成独立一行（同名 2.4G/5G 不会合并）。
+func ParseNetshBSSIDOutput(output string) []WiFiNetwork {
+	networks := make([]WiFiNetwork, 0)
+
+	var ssid, auth, enc string
+	var current *WiFiNetwork
+
+	flush := func() {
+		if current != nil {
+			networks = append(networks, *current)
+			current = nil
+		}
+	}
+
+	for _, raw := range strings.Split(output, "\n") {
+		// netsh 在中文系统输出 GBK，ASCII 字段（BSSID/信道/数值）不受影响，
+		// SSID 若含非 ASCII 字符可能乱码，属于控制台代码页限制。
+		line := strings.TrimRight(raw, "\r")
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		trimmed := strings.TrimSpace(line)
+
+		if match := netshSSIDPattern.FindStringSubmatch(trimmed); match != nil && indent == 0 {
+			flush()
+			ssid, auth, enc = strings.TrimSpace(match[1]), "", ""
+			continue
+		}
+
+		key, value, found := strings.Cut(trimmed, ":")
+		if !found {
+			continue
+		}
+
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+
+		if match := netshBSSIDPattern.FindStringSubmatch(trimmed); match != nil {
+			flush()
+			n := WiFiNetwork{
+				ESSID: ssid,
+				BSSID: normalizeMAC(match[1]),
+			}
+			n.Enc, n.Auth, n.Cipher = mapNetshSecurity(auth, enc)
+			current = &n
+			continue
+		}
+
+		if current != nil && indent >= 5 {
+			switch {
+			case key == "Signal" || key == "信号":
+				// netsh 只给百分比，按通行线性公式换算为 dBm：dBm ≈ pct/2 - 100。
+				if m := netshIntPattern.FindStringSubmatch(value); m != nil {
+					current.Signal = atoi(m[1])/2 - 100
+				}
+			case key == "Radio type" || key == "无线电类型":
+				current.PHY = value
+			case key == "Channel" || key == "频道":
+				current.Channel = atoi(value)
+				current.Freq = channelBand(current.Channel)
+			}
+			continue
+		}
+
+		// SSID 段级字段（缩进 4 列）。
+		switch key {
+		case "Authentication", "身份验证":
+			auth = value
+		case "Encryption", "加密":
+			enc = value
+		}
+	}
+
+	flush()
+
+	return networks
+}
+
+// channelBand 按信道号推断频段：1-14 为 2.4GHz，其余按 5GHz 呈现。
+func channelBand(channel int) string {
+	switch {
+	case channel >= 1 && channel <= 14:
+		return "2GHz"
+	case channel > 14:
+		return "5GHz"
+	default:
+		return ""
+	}
+}
+
+// mapNetshSecurity 把 netsh 的身份验证/加密两个字段归一化到表格三列。
+func mapNetshSecurity(auth, enc string) (security, akm, cipher string) {
+	auth, enc = strings.ToUpper(auth), strings.ToUpper(enc)
+
+	switch {
+	case strings.Contains(auth, "WPA3"):
+		security = "WPA3"
+	case strings.Contains(auth, "WPA2"):
+		security = "WPA2"
+	case strings.Contains(auth, "WPA"):
+		security = "WPA"
+	case strings.Contains(auth, "WEP"):
+		return "WEP", "", "WEP"
+	case strings.Contains(auth, "OPEN"), auth == "":
+		security = "OPEN"
+	}
+
+	switch {
+	case strings.Contains(auth, "ENTERPRISE"):
+		akm = "802.1X"
+	case security == "WPA3":
+		akm = "SAE"
+	case security == "WPA" || security == "WPA2":
+		akm = "PSK"
+	}
+
+	if enc != "" && enc != "NONE" {
+		cipher = enc
+	}
+
+	return security, akm, cipher
+}
+
+// ---------------------------------------------------------------------------
+// Android / Termux：系统不开放原生扫描，只能借助 Termux:API 读取有限信息
+// ---------------------------------------------------------------------------
+
+// termuxConnectionInfo 对应 termux-wifi-connection-info 的 JSON。
+type termuxConnectionInfo struct {
+	State     string `json:"supplicant_state"`
+	BSSID     string `json:"bssid"`
+	SSID      string `json:"ssid"`
+	RSSI      int    `json:"rssi"`
+	Frequency int    `json:"frequency"`
+	Speed     int    `json:"link_speed_mbps"`
+	Error     string `json:"error"`
+}
+
+// termuxScanEntry 对应旧版 termux-wifi-scaninfo 的 JSON 数组元素。
+type termuxScanEntry struct {
+	BSSID        string `json:"bssid"`
+	SSID         string `json:"ssid"`
+	RSSI         int    `json:"level"`
+	Frequency    int    `json:"frequency"`
+	Capabilities string `json:"capabilities"`
+}
+
+// scanTermuxNetworks 优先尝试周边扫描；新版 Android 普遍封禁该接口，
+// 失败时退回只含当前连接网络的 connection-info，并在完全不可用时明确报错。
+func scanTermuxNetworks() ([]WiFiNetwork, error) {
+	if _, err := exec.LookPath("termux-wifi-connection-info"); err != nil {
+		return nil, errors.New("Android 无 root 无法直接扫描：请安装 Termux:API 应用，并在 Termux 内执行 pkg install termux-api")
+	}
+
+	connectedBSSID := ""
+	if output, err := runCommandWithTimeout(15*time.Second, "termux-wifi-connection-info"); err == nil {
+		var info termuxConnectionInfo
+		if json.Unmarshal([]byte(output), &info) == nil && info.Error == "" &&
+			info.State == "COMPLETED" {
+			connectedBSSID = normalizeMAC(info.BSSID)
+		}
+	}
+
+	// scaninfo 是唯一可能给出周边列表的途径；Android 9+ 多数设备直接返回错误。
+	if output, err := runCommandWithTimeout(20*time.Second, "termux-wifi-scaninfo"); err == nil {
+		var entries []termuxScanEntry
+		if json.Unmarshal([]byte(output), &entries) == nil && len(entries) > 0 {
+			networks := make([]WiFiNetwork, 0, len(entries))
+			for _, entry := range entries {
+				network := WiFiNetwork{
+					ESSID:   entry.SSID,
+					BSSID:   normalizeMAC(entry.BSSID),
+					Signal:  entry.RSSI,
+					Channel: freqToChannel(entry.Frequency),
+					Freq:    bandLabel(entry.Frequency),
+				}
+				network.Enc, network.Cipher, network.Auth = parseTermuxCapabilities(entry.Capabilities)
+
+				if network.BSSID == connectedBSSID {
+					network.Connected = true
+				}
+
+				networks = append(networks, network)
+			}
+
+			return networks, nil
+		}
+	}
+
+	// 周边扫描不可用时，至少呈现当前连接的网络（真实 BSSID 由系统 API 提供）。
+	if connectedBSSID != "" {
+		output, _ := runCommandWithTimeout(15*time.Second, "termux-wifi-connection-info")
+		var info termuxConnectionInfo
+		if json.Unmarshal([]byte(output), &info) == nil {
+			return []WiFiNetwork{{
+				ESSID:     info.SSID,
+				BSSID:     connectedBSSID,
+				Signal:    info.RSSI,
+				Rate:      info.Speed,
+				Channel:   freqToChannel(info.Frequency),
+				Freq:      bandLabel(info.Frequency),
+				Connected: true,
+			}}, nil
+		}
+	}
+
+	return nil, errors.New("未能从 Termux:API 获取 Wi-Fi 信息：请确认已授予位置权限且 Wi-Fi 已开启；Android 9+ 周边扫描默认被系统限流或禁用")
+}
+
+// parseTermuxCapabilities 解析 wpa_supplicant 风格能力串，如
+// [WPA2-PSK-CCMP][RSN-PSK-CCMP][ESS]，只取其中最强的一组标签。
+func parseTermuxCapabilities(capabilities string) (security, cipher, akm string) {
+	upper := strings.ToUpper(capabilities)
+
+	switch {
+	case strings.Contains(upper, "WPA3"):
+		security = "WPA3"
+	case strings.Contains(upper, "WPA2"):
+		security = "WPA2"
+	case strings.Contains(upper, "WPA"):
+		security = "WPA"
+	case strings.Contains(upper, "WEP"):
+		return "WEP", "WEP", ""
+	default:
+		security = "OPEN"
+	}
+
+	switch {
+	case strings.Contains(upper, "EAP"):
+		akm = "802.1X"
+	case security == "WPA3":
+		akm = "SAE"
+	case security == "WPA" || security == "WPA2":
+		akm = "PSK"
+	}
+
+	switch {
+	case strings.Contains(upper, "GCMP"):
+		cipher = "GCMP"
+	case strings.Contains(upper, "CCMP"):
+		cipher = "CCMP"
+	case strings.Contains(upper, "TKIP"):
+		cipher = "TKIP"
+	}
+
+	return security, cipher, akm
+}
+
+// ---------------------------------------------------------------------------
+// macOS 增强：root 下用 wdutil 补当前已连接网络的 BSSID
+// ---------------------------------------------------------------------------
+
+// enrichMacOSConnectedBSSID 在 root 运行时解析 `wdutil info`，
+// 把已连接网络的 BSSID 补上；普通权限下 wdutil 直接报错，静默忽略。
+// 周边未连接网络的 BSSID 被 macOS 隐私框架封禁，任何 CLI 都无法获取。
+func enrichMacOSConnectedBSSID(networks []WiFiNetwork) {
+	output, err := runCommand("wdutil", "info")
+	if err != nil {
+		return
+	}
+
+	bssid := ""
+	for line := range strings.SplitSeq(output, "\n") {
+		key, value, found := strings.Cut(line, ":")
+		if !found || !strings.EqualFold(strings.TrimSpace(key), "BSSID") {
+			continue
+		}
+
+		if mac := normalizeMAC(value); mac != "" {
+			bssid = mac
+			break
+		}
+	}
+
+	if bssid == "" {
+		return
+	}
+
+	for i := range networks {
+		if networks[i].Connected {
+			networks[i].BSSID = bssid
+		}
 	}
 }
 
@@ -1037,7 +1740,7 @@ func normalizeMAC(raw string) string {
 // windowsState 把 netsh 状态归一化为 UP / DOWN。
 func windowsState(raw string) string {
 	state := strings.TrimSpace(raw)
-	if strings.EqualFold(state, "connected") || strings.Contains(state, "已连接") {
+	if strings.EqualFold(state, "connected") || strings.Contains(state, "【已连接】") {
 		return "UP"
 	}
 
@@ -1122,27 +1825,9 @@ func stateColor(state string) string {
 
 // terminalWidth 查询终端列数，供表格自适应。
 // 非终端输出（管道、日志捕获）或查询失败返回 0 表示不限宽，
-// 保证落盘与重定向场景的数据完整性；Windows 暂不查询，同样不限宽。
+// 保证落盘与重定向场景的数据完整性。具体系统调用见平台构建文件。
 func terminalWidth() int {
-	switch utilities.GetOS() {
-	case utilities.Linux, utilities.Darwin, utilities.Android:
-	default:
-		return 0
-	}
-
-	// TIOCGWINSZ 的请求码按平台区分：Linux 为 0x5413，macOS 为 0x40087468。
-	request := uintptr(0x5413)
-	if utilities.GetOS() == utilities.Darwin {
-		request = 0x40087468
-	}
-
-	var size winsize
-	_, _, errno := syscall.Syscall(sysIoctl, uintptr(syscall.Stdout), request, uintptr(unsafe.Pointer(&size)))
-	if errno != 0 || size.cols == 0 {
-		return 0
-	}
-
-	return int(size.cols)
+	return terminalColumnWidth()
 }
 
 // renderTable 输出带标题的等宽表格；终端过窄时按列优先级自动省略次要列。
