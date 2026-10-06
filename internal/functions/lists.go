@@ -251,6 +251,11 @@ type tableColumn[T any] struct {
 	Shrink   bool
 }
 
+// gridCell 是网格布局中的一个单元：文本加可选颜色（空串不着色）。
+type gridCell struct {
+	Text, Color string
+}
+
 // termuxConnectionInfo 对应 termux-wifi-connection-info 的 JSON。
 type termuxConnectionInfo struct {
 	State     string `json:"supplicant_state"`
@@ -1908,6 +1913,73 @@ func renderTable[T any](title string, columns []tableColumn[T], items []T) {
 	for index, row := range shown {
 		fmt.Println(formatRow(row, widths, rowColors[index]))
 	}
+}
+
+// renderGrid 把等宽单元格按终端宽度折行输出，适合法规域这类数量多、
+// 单格信息少的枚举型数据，相比单列纵表能省下大量纵向空间。
+func renderGrid(title string, cells []gridCell) {
+	if len(cells) == 0 {
+		return
+	}
+
+	// 全部单元格等宽：取最大显示宽度，保证列与列对齐。
+	width := 0
+	for _, cell := range cells {
+		if current := cellWidth(cell.Text); current > width {
+			width = current
+		}
+	}
+
+	// 终端宽度未知（0）时按 4 列兜底；过窄时退化为单列。
+	columns := 4
+	if termWidth := terminalWidth(); termWidth > 0 {
+		columns = (termWidth + columnGap) / (width + columnGap)
+		if columns < 1 {
+			columns = 1
+		}
+	}
+	if columns > len(cells) {
+		columns = len(cells)
+	}
+
+	fmt.Printf("\n%s%s%s\n", constants.ColorCyan, title, constants.ColorReset)
+
+	lines := make([]string, 0, (len(cells)+columns-1)/columns)
+	for start := 0; start < len(cells); start += columns {
+		end := start + columns
+		if end > len(cells) {
+			end = len(cells)
+		}
+
+		var line strings.Builder
+		for index, cell := range cells[start:end] {
+			if index > 0 {
+				line.WriteString(strings.Repeat(" ", columnGap))
+			}
+
+			// 行尾格不补空格，避免输出行拖着一串无意义的空白。
+			padding := ""
+			if index < end-start-1 {
+				padding = strings.Repeat(" ", width-cellWidth(cell.Text))
+			}
+
+			if cell.Color != "" {
+				line.WriteString(cell.Color)
+			}
+
+			line.WriteString(cell.Text)
+
+			if cell.Color != "" {
+				line.WriteString(constants.ColorReset)
+			}
+
+			line.WriteString(padding)
+		}
+
+		lines = append(lines, line.String())
+	}
+
+	fmt.Println(strings.Join(lines, "\n"))
 }
 
 // fitColumns 依据终端宽度决定保留哪些列：先省略优先级数值大的列，

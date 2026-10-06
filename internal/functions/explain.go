@@ -12,28 +12,6 @@ import (
 // iwRegPattern 从 `iw reg get` 输出中提取内核当前生效的法规域国码。
 var iwRegPattern = regexp.MustCompile(`(?m)^country ([A-Z]{2}):`)
 
-// verdictColumns 复用泛型表格渲染，保持与主扫描表一致的排版与自适应行为。
-var verdictColumns = []tableColumn[verdictRow]{
-	{
-		Header: "国码",
-		Value: func(r verdictRow) string {
-			return r.Code
-		},
-		Priority: 1,
-	},
-	{
-		Header:   "国家/地区",
-		Value:    rowCountry,
-		Priority: 2,
-	},
-	{
-		Header:   "信道状态",
-		Value:    func(r verdictRow) string { return r.Status.String() },
-		Color:    verdictColor,
-		Priority: 3,
-	},
-}
-
 // eapColumns 以对照表呈现常见 EAP 方法的安全态势，与法规对照表共用渲染设施。
 var eapColumns = []tableColumn[eapRow]{
 	{
@@ -88,25 +66,9 @@ var eapRows = []eapRow{
 	},
 }
 
-// verdictRow 是法规对照表的一行：某法规域对目标信道的判定。
-type verdictRow struct {
-	Code, Country string
-	Status        radio.ChannelVerdict
-	Current       bool // 是否为内核当前生效的法规域
-}
-
 // eapRow 是 EAP 方法态势对照表的一行。
 type eapRow struct {
 	Method, Inner, Posture string
-}
-
-// rowCountry 在内核当前生效的法规域后标出 ←。
-func rowCountry(r verdictRow) string {
-	if r.Current {
-		return r.Country + " ←"
-	}
-
-	return r.Country
 }
 
 // ExplainNetworks 在锁定模式下对命中的目标网络输出全面技术解读：
@@ -186,7 +148,7 @@ func explainProfile(network *WiFiNetwork) {
 }
 
 // explainRegulatory 以法规域数据解读目标信道的合规性。
-// 默认输出全法规域对照表；检测到内核法规域时高亮该行；
+// 默认以网格输出全法规域对照（省纵向空间）；检测到内核法规域时用 ← 标出；
 // 指定国码时只展开该域的细节说明。
 func explainRegulatory(network *WiFiNetwork, domains map[string]radio.Domain, countryOverride string) {
 	explainSection("法规合规")
@@ -206,28 +168,33 @@ func explainRegulatory(network *WiFiNetwork, domains map[string]radio.Domain, co
 	}
 
 	kernel := kernelRegDomain()
-	rows := make([]verdictRow, 0, len(domains))
-	for _, domain := range radio.SortedDomains(domains) {
-		rows = append(rows, verdictRow{
-			Code:    domain.Country,
-			Country: domain.Name,
-			Status:  radio.Verdict(domain, network.Channel),
-			Current: kernel != "" && domain.Country == kernel,
-		})
+	sorted := radio.SortedDomains(domains)
+
+	cells := make([]gridCell, 0, len(sorted))
+	hasDFS := false
+	for _, domain := range sorted {
+		verdict := radio.Verdict(domain, network.Channel)
+		if verdict == radio.DFSRequired {
+			hasDFS = true
+		}
+
+		text := fmt.Sprintf("%s %s · %s", domain.Country, domain.Name, verdict)
+		if kernel != "" && domain.Country == kernel {
+			text += " ←" // 标出内核当前生效的法规域
+		}
+
+		cells = append(cells, gridCell{Text: text, Color: verdictColor(verdict.String())})
 	}
 
 	if kernel != "" {
-		fmt.Printf("  当前内核法规域：%s（iw reg get），对照表中已用 ← 标出\n", kernel)
+		fmt.Printf("  当前内核法规域：%s（iw reg get），网格中已用 ← 标出\n", kernel)
 	}
 
-	renderTable(fmt.Sprintf("信道 %d 各法规域对照", network.Channel), verdictColumns, rows)
+	renderGrid(fmt.Sprintf("信道 %d 各法规域对照", network.Channel), cells)
 
 	// 任一法规域判定为 DFS 时都补充说明，因为 DFS 直接影响 AP 的可用性表现。
-	for _, row := range rows {
-		if row.Status == radio.DFSRequired {
-			explainDFS(network.Channel)
-			return
-		}
+	if hasDFS {
+		explainDFS(network.Channel)
 	}
 }
 

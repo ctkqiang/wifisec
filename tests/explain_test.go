@@ -37,6 +37,41 @@ func captureStdout(t *testing.T, fn func()) string {
 	return buffer.String()
 }
 
+// TestExplainRegulatoryGrid 验证法规合规区块以网格呈现：
+// 单元格含国码、名称与判定，且一行容纳多格（网格化的意义所在）。
+func TestExplainRegulatoryGrid(t *testing.T) {
+	network := functions.WiFiNetwork{
+		ESSID: "grid-check", BSSID: "aa:bb:cc:dd:ee:ff",
+		Enc: "WPA2", Cipher: "CCMP", Auth: "PSK",
+		Channel: 157, Freq: "5GHz", Signal: -55,
+	}
+
+	output := captureStdout(t, func() {
+		functions.ExplainNetworks([]functions.WiFiNetwork{network}, "")
+	})
+
+	for _, marker := range []string{"信道 157 各法规域对照", "AU 澳大利亚 · 合法", "EU 欧盟 · 禁用"} {
+		if !strings.Contains(output, marker) {
+			t.Errorf("网格输出应包含 %q，实际输出：\n%s", marker, output)
+		}
+	}
+
+	// 网格特征：至少一行装了两个以上单元格（即含两个判定标记）。
+	// 用「· 合法 / · 禁用 / · DFS」计数，避开安全态势行里的「· 套件 · 认证」。
+	gridLike := false
+	for _, line := range strings.Split(output, "\n") {
+		verdicts := strings.Count(line, "· 合法") + strings.Count(line, "· 禁用") + strings.Count(line, "· DFS")
+		if verdicts >= 2 {
+			gridLike = true
+			break
+		}
+	}
+
+	if !gridLike {
+		t.Errorf("法规域应以网格（一行多格）呈现，实际输出：\n%s", output)
+	}
+}
+
 // TestExplainSecurityRouting 验证安全态势按认证方式分流：
 // 企业级（802.1X）输出 EAP 态势对照表，个人级输出 PSK/SAE 话术，互不串场。
 func TestExplainSecurityRouting(t *testing.T) {
