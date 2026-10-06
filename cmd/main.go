@@ -6,29 +6,17 @@ import (
 	"syscall"
 	"wifisec/internal/constants"
 	"wifisec/internal/functions"
-	"wifisec/internal/model"
 	"wifisec/internal/utilities"
 )
 
 var (
-	session           = utilities.NewSession()
-	developerMetadata = model.Developer{
-		Id:           nil,
-		Name:         "钟智强",
-		Organisation: "哪吒网络安全",
-		Email:        "johnmelodymel@qq.com",
-		Weixin:       "ctkqiang",
-		Version:      "v0.0.1",
-		ProjectUrl:   "https://github.com/ctkqiang/wifisec.git",
-		SessionId:    session.ID,
-	}
 	defaultMinLevel = constants.LevelInfo
+	commandHandlers = map[string]utilities.CommandFunction{
+		"deauth": functions.WifiDeauther,
+		"list":   functions.WifiList,
+		"help":   functions.HelpUsage,
+	}
 )
-
-var commandHandlers = map[string]utilities.CommandFunction{
-	"deauth": functions.WifiDeauther,
-	"list":   functions.WifiList,
-}
 
 func init() {
 	for name, handler := range commandHandlers {
@@ -40,10 +28,6 @@ func main() {
 	sessionSignalChannel := make(chan os.Signal, 1)
 
 	utilities.Init(defaultMinLevel)
-	utilities.Info(
-		"%s",
-		developerMetadata.String(),
-	)
 
 	signal.Notify(
 		sessionSignalChannel,
@@ -58,4 +42,7 @@ func main() {
 
 		os.Exit(0)
 	}()
+
+	// 分发命令行子命令；此前注册表只登记不分发，导致任何子命令都不会执行。
+	utilities.ArgumentsHandler()
 }
