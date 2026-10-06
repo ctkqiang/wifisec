@@ -174,6 +174,7 @@ var networkColumns = []tableColumn[WiFiNetwork]{
 		Value: func(n WiFiNetwork) string {
 			return signalLabel(n.Signal)
 		},
+		Color: signalColor,
 	},
 	{
 		Header: "噪声",
@@ -203,6 +204,14 @@ var networkColumns = []tableColumn[WiFiNetwork]{
 			return rateLabel(n.Rate)
 		},
 	},
+}
+
+// netshWirelessEntry 是 netsh 输出中的一个适配器。
+type netshWirelessEntry struct {
+	Name        string
+	Description string
+	MAC         string
+	State       string
 }
 
 // WirelessInterface 描述一块无线网卡，字段覆盖 airmon-ng 展示的信息。
@@ -276,6 +285,21 @@ func signalLabel(dbm int) string {
 	return fmt.Sprintf("%d dBm", dbm)
 }
 
+// signalColor 按强度给信号着色，阈值沿用无线勘测的通行经验：
+// -50 dBm 以上为强信号，-70 dBm 以下连接质量已不可靠。
+func signalColor(label string) string {
+	switch dbm := atoi(strings.TrimSuffix(label, " dBm")); {
+	case dbm == 0:
+		return ""
+	case dbm >= -50:
+		return constants.ColorGreen
+	case dbm >= -70:
+		return constants.ColorYellow
+	default:
+		return constants.ColorRed
+	}
+}
+
 // rateLabel 把速率渲染为可读文本。
 func rateLabel(mbps int) string {
 	if mbps == 0 {
@@ -286,19 +310,30 @@ func rateLabel(mbps int) string {
 }
 
 // WifiList 列出无线接口与周边网络，已连接的网络会一并标出。
+// 传入 ESSID 或 BSSID 时进入锁定模式，类似 airodump-ng --bssid：
+// 跳过接口表，只呈现命中的目标网络。
 func WifiList(arguments []string) error {
-	devices, err := FindAllWirelessInterfaces()
-	if err != nil {
-		return err
+	target := ""
+	if len(arguments) > 0 {
+		target = strings.TrimSpace(arguments[0])
 	}
 
-	if len(devices) == 0 {
-		utilities.Warn("未发现可用无线接口")
-		return nil
+	// 锁定模式不枚举接口：扫描数据来自系统级查询，与接口枚举无关，
+	// 直奔目标也贴近 airodump-ng 锁定信道后的纯粹画面。
+	if target == "" {
+		devices, err := FindAllWirelessInterfaces()
+		if err != nil {
+			return err
+		}
+
+		if len(devices) == 0 {
+			utilities.Warn("未发现可用无线接口")
+		} else {
+			renderTable(fmt.Sprintf("无线接口 · 共 %d 个", len(devices)), interfaceColumns, devices)
+		}
 	}
 
-	renderTable(fmt.Sprintf("无线接口 · 共 %d 个", len(devices)), interfaceColumns, devices)
-
+	started := time.Now()
 	networks := scanNetworks()
 	if len(networks) == 0 {
 		// macOS 在 Wi-Fi 关闭时会省略 SSID，导致扫不到可命名的网络。
@@ -306,7 +341,17 @@ func WifiList(arguments []string) error {
 		return nil
 	}
 
-	sortNetworks(networks)
+	if target != "" {
+		networks = filterNetworks(networks, target)
+		if len(networks) == 0 {
+			utilities.Warn("未找到目标 %s，请传入完整 ESSID 或 BSSID", target)
+			return nil
+		}
+	} else {
+		sortNetworks(networks)
+	}
+
+	renderScanStatus(networks, time.Since(started))
 	renderTable(fmt.Sprintf("无线网络 · 共 %d 个", len(networks)), networkColumns, networks)
 
 	return nil
@@ -352,6 +397,45 @@ func sortNetworks(networks []WiFiNetwork) {
 
 		return networks[i].Signal > networks[j].Signal
 	})
+}
+
+// filterNetworks 按目标筛选网络：ESSID 忽略大小写精确匹配；
+// BSSID 去冒号后同样比较，方便少敲几个分隔符也能锁定。
+// macOS 暂不提供 BSSID，该分支在补齐 Linux/Windows 扫描后自然生效。
+func filterNetworks(networks []WiFiNetwork, target string) []WiFiNetwork {
+	compact := strings.ReplaceAll(target, ":", "")
+	matches := make([]WiFiNetwork, 0, 1)
+
+	for _, network := range networks {
+		bssid := strings.ReplaceAll(network.BSSID, ":", "")
+		if strings.EqualFold(network.ESSID, target) || (bssid != "" && strings.EqualFold(bssid, compact)) {
+			matches = append(matches, network)
+		}
+	}
+
+	return matches
+}
+
+// renderScanStatus 输出 airodump-ng 风格的状态栏，作为扫描画面的视觉签名：
+// 已连接时显示所在信道，否则显示 hop 表示系统在多信道间跳变扫描。
+func renderScanStatus(networks []WiFiNetwork, elapsed time.Duration) {
+	channel := "hop"
+	for _, network := range networks {
+		if network.Connected && network.Channel != 0 {
+			channel = strconv.Itoa(network.Channel)
+			break
+		}
+	}
+
+	fmt.Printf(
+		" %sCH %s%s ][ Elapsed: %d s ][ %s%s\n\n",
+		constants.ColorCyan,
+		channel,
+		constants.ColorReset,
+		int(elapsed.Seconds()),
+		time.Now().Format("2006-01-02 15:04:05"),
+		constants.ColorReset,
+	)
 }
 
 // FindAllWirelessInterfaces 按当前平台枚举无线接口。
@@ -790,14 +874,6 @@ func macOSDriver() string {
 	}
 
 	return ""
-}
-
-// netshWirelessEntry 是 netsh 输出中的一个适配器。
-type netshWirelessEntry struct {
-	Name        string
-	Description string
-	MAC         string
-	State       string
 }
 
 // findWindowsWireless 通过 netsh 枚举无线接口。
