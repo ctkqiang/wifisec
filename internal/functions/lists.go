@@ -19,6 +19,192 @@ import (
 	"wifisec/internal/utilities"
 )
 
+const (
+	columnGap      = 2                // 列间空格数
+	placeholder    = "-"              // 平台取不到的字段占位
+	commandTimeout = 10 * time.Second // 外部命令超时
+)
+
+// hardwarePort 是 networksetup 输出的一个硬件端口。
+type hardwarePort struct {
+	Port            string
+	Device          string
+	EthernetAddress string
+}
+
+// tableColumn 描述表格的一列；Color 返回空串表示该列不着色。
+type tableColumn[T any] struct {
+	Header string
+	Value  func(T) string
+	Color  func(string) string
+}
+
+var (
+	iwTypePattern      = regexp.MustCompile(`(?m)^\s*type\s+(\S+)`)
+	netshDriverPattern = regexp.MustCompile(`(?m)^\s*(?:Driver|驱动程序)\s*:\s*(.+)$`)
+	airportNodePattern = regexp.MustCompile(`"IONetworkRootType"\s*=\s*"airport"`)
+	driverIDPattern    = regexp.MustCompile(`"(?:CFBundleIdentifier|IOPersonalityPublisher)"\s*=\s*"([^"]+)"`)
+	channelPattern     = regexp.MustCompile(`(\d+)\s*\((\d+GHz)(?:,\s*(\d+)MHz)?`)
+	intPattern         = regexp.MustCompile(`(-?\d+)`)
+
+	// 无法读取 /proc/net/wireless 时，按常见无线接口名前缀兜底识别。
+	namePrefixes = []string{"wlan", "wlp", "wlx", "wl", "ath", "ra"}
+)
+
+var interfaceColumns = []tableColumn[WirelessInterface]{
+	{
+		Header: "PHY",
+		Value: func(d WirelessInterface) string {
+			return d.PHY
+		},
+	},
+	{
+		Header: "接口",
+		Value: func(d WirelessInterface) string {
+			return d.Name
+		},
+	},
+	{
+		Header: "索引",
+		Value: func(d WirelessInterface) string {
+			return number(d.Index)
+		},
+	},
+	{
+		Header: "类型",
+		Value: func(d WirelessInterface) string {
+			return d.Mode
+		},
+	},
+	{
+		Header: "状态",
+		Value: func(d WirelessInterface) string {
+			return d.State
+		},
+		Color: stateColor,
+	},
+	{
+		Header: "MAC 地址",
+		Value: func(d WirelessInterface) string {
+			return d.HardwareAddr
+		},
+	},
+	{
+		Header: "驱动",
+		Value: func(d WirelessInterface) string {
+			return d.Driver
+		},
+	},
+	{
+		Header: "芯片组",
+		Value: func(d WirelessInterface) string {
+			return d.Chipset
+		},
+	},
+}
+
+// networkColumns 同时呈现已连接与未连接的网络。
+// BSSID 与加密套件由 macOS 的 profiler 不提供，渲染时会显示占位符。
+var networkColumns = []tableColumn[WiFiNetwork]{
+	{
+		Header: "连接",
+		Value:  connLabel,
+		Color:  connColor,
+	},
+	{
+		Header: "ESSID",
+		Value: func(n WiFiNetwork) string {
+			return n.ESSID
+		},
+	},
+	{
+		Header: "BSSID",
+		Value: func(n WiFiNetwork) string {
+			return n.BSSID
+		},
+	},
+	{
+		Header: "PHY",
+		Value: func(n WiFiNetwork) string {
+			return n.PHY
+		},
+	},
+	{
+		Header: "信道",
+		Value: func(n WiFiNetwork) string {
+			return number(n.Channel)
+		},
+	},
+	{
+		Header: "频段",
+		Value: func(n WiFiNetwork) string {
+			return n.Freq
+		},
+	},
+	{
+		Header: "带宽",
+		Value: func(n WiFiNetwork) string {
+			if n.ChannelWidth == 0 {
+				return ""
+			}
+
+			return fmt.Sprintf("%d MHz", n.ChannelWidth)
+		},
+	},
+	{
+		Header: "加密",
+		Value: func(n WiFiNetwork) string {
+			return n.Enc
+		},
+	},
+	{
+		Header: "加密套件",
+		Value: func(n WiFiNetwork) string {
+			return n.Cipher
+		},
+	},
+	{
+		Header: "认证",
+		Value: func(n WiFiNetwork) string {
+			return n.Auth
+		},
+	},
+	{
+		Header: "信号",
+		Value: func(n WiFiNetwork) string {
+			return signalLabel(n.Signal)
+		},
+	},
+	{
+		Header: "噪声",
+		Value: func(n WiFiNetwork) string {
+			return signalLabel(n.NoiseFloor)
+		},
+	},
+	{
+		Header: "SNR",
+		Value: func(n WiFiNetwork) string {
+			if n.SNR == 0 {
+				return ""
+			}
+
+			return fmt.Sprintf("%d dB", n.SNR)
+		},
+	},
+	{
+		Header: "MCS",
+		Value: func(n WiFiNetwork) string {
+			return number(n.MCSIndex)
+		},
+	},
+	{
+		Header: "速率",
+		Value: func(n WiFiNetwork) string {
+			return rateLabel(n.Rate)
+		},
+	},
+}
+
 // WirelessInterface 描述一块无线网卡，字段覆盖 airmon-ng 展示的信息。
 type WirelessInterface struct {
 	PHY          string // 物理设备编号，如 phy0
@@ -32,47 +218,26 @@ type WirelessInterface struct {
 }
 
 type WiFiNetwork struct {
-	Id        int    `json:"id"`        // 网络ID
-	BSSID     string `json:"bssid"`     // AP 的 MAC 地址
-	Channel   int    `json:"channel"`   // WiFi 信道
-	Signal    int    `json:"signal"`    // 信号强度（单位：dBm）
-	Rate      int    `json:"rate"`      // 最大数据速率（单位：Mbps）
-	Enc       string `json:"enc"`       // 加密类型（WPA2、WEP、OPEN）
-	Cipher    string `json:"cipher"`    // 加密方式（CCMP、TKIP、WEP）
-	Auth      string `json:"auth"`      // 认证方式（PSK、OPEN、802.1X）
-	ESSID     string `json:"ssid"`      // 网络名称
-	Device    string `json:"device"`    // 无线接口名称
-	Freq      string `json:"freq"`      // 频率（例如：2.437 GHz）
-	Connected bool   `json:"connected"` // 是否当前已连接
-}
+	Id      int    `json:"id"`      // 网络ID
+	BSSID   string `json:"bssid"`   // AP 的 MAC 地址
+	Channel int    `json:"channel"` // WiFi 信道
+	Signal  int    `json:"signal"`  // 信号强度（单位：dBm）
+	Rate    int    `json:"rate"`    // 最大数据速率（单位：Mbps）
+	Enc     string `json:"enc"`     // 加密类型（WPA2、WEP、OPEN）
+	Cipher  string `json:"cipher"`  // 加密方式（CCMP、TKIP、WEP）
+	Auth    string `json:"auth"`    // 认证方式（PSK、OPEN、802.1X）
+	ESSID   string `json:"ssid"`    // 网络名称
+	Device  string `json:"device"`  // 无线接口名称
+	Freq    string `json:"freq"`    // 频段（例如：5GHz）
+	PHY     string `json:"phy"`     // 802.11 模式（例如：802.11ax）
 
-// tableColumn 描述表格的一列；Color 返回空串表示该列不着色。
-type tableColumn[T any] struct {
-	Header string
-	Value  func(T) string
-	Color  func(string) string
-}
+	// 物理层与链路质量
+	ChannelWidth int `json:"channel_width"` // 信道带宽（单位：MHz）
+	NoiseFloor   int `json:"noise_floor"`   // 噪声底（单位：dBm）
+	SNR          int `json:"snr"`           // 信噪比（单位：dB）
+	MCSIndex     int `json:"mcs_index"`     // 调制编码方案索引
 
-var interfaceColumns = []tableColumn[WirelessInterface]{
-	{Header: "PHY", Value: func(d WirelessInterface) string { return d.PHY }},
-	{Header: "接口", Value: func(d WirelessInterface) string { return d.Name }},
-	{Header: "索引", Value: func(d WirelessInterface) string { return number(d.Index) }},
-	{Header: "类型", Value: func(d WirelessInterface) string { return d.Mode }},
-	{Header: "状态", Value: func(d WirelessInterface) string { return d.State }, Color: stateColor},
-	{Header: "MAC 地址", Value: func(d WirelessInterface) string { return d.HardwareAddr }},
-	{Header: "驱动", Value: func(d WirelessInterface) string { return d.Driver }},
-	{Header: "芯片组", Value: func(d WirelessInterface) string { return d.Chipset }},
-}
-
-// networkColumns 同时呈现已连接与未连接的网络。
-var networkColumns = []tableColumn[WiFiNetwork]{
-	{Header: "连接", Value: connLabel, Color: connColor},
-	{Header: "ESSID", Value: func(n WiFiNetwork) string { return n.ESSID }},
-	{Header: "信道", Value: func(n WiFiNetwork) string { return number(n.Channel) }},
-	{Header: "频段", Value: func(n WiFiNetwork) string { return n.Freq }},
-	{Header: "加密", Value: func(n WiFiNetwork) string { return n.Enc }},
-	{Header: "认证", Value: func(n WiFiNetwork) string { return n.Auth }},
-	{Header: "信号", Value: func(n WiFiNetwork) string { return signalLabel(n.Signal) }},
+	Connected bool `json:"connected"` // 是否当前已连接
 }
 
 // number 把数值渲染为文本，0 视为未知。
@@ -111,23 +276,14 @@ func signalLabel(dbm int) string {
 	return fmt.Sprintf("%d dBm", dbm)
 }
 
-var (
-	iwTypePattern      = regexp.MustCompile(`(?m)^\s*type\s+(\S+)`)
-	netshDriverPattern = regexp.MustCompile(`(?m)^\s*(?:Driver|驱动程序)\s*:\s*(.+)$`)
-	airportNodePattern = regexp.MustCompile(`"IONetworkRootType"\s*=\s*"airport"`)
-	driverIDPattern    = regexp.MustCompile(`"(?:CFBundleIdentifier|IOPersonalityPublisher)"\s*=\s*"([^"]+)"`)
-	channelPattern     = regexp.MustCompile(`^(\d+)\s*\((\d+GHz)`)
-	intPattern         = regexp.MustCompile(`-?\d+`)
+// rateLabel 把速率渲染为可读文本。
+func rateLabel(mbps int) string {
+	if mbps == 0 {
+		return ""
+	}
 
-	// 无法读取 /proc/net/wireless 时，按常见无线接口名前缀兜底识别。
-	namePrefixes = []string{"wlan", "wlp", "wlx", "wl", "ath", "ra"}
-)
-
-const (
-	columnGap      = 2                // 列间空格数
-	placeholder    = "-"              // 平台取不到的字段占位
-	commandTimeout = 10 * time.Second // 外部命令超时
-)
+	return fmt.Sprintf("%d Mbps", mbps)
+}
 
 // WifiList 列出无线接口与周边网络，已连接的网络会一并标出。
 func WifiList(arguments []string) error {
@@ -161,10 +317,30 @@ func scanNetworks() []WiFiNetwork {
 	switch utilities.GetOS() {
 	case utilities.Darwin:
 		_, networks := parseMacOSProfile(macOSProfile())
-		return networks
+		return dedupeNetworks(networks)
 	default:
 		return nil
 	}
+}
+
+// dedupeNetworks 按 ESSID+信道去重。macOS 会把同一网络同时列在
+// “当前网络”与“其他网络”里且不提供 BSSID，无法再细分；
+// 当前网络先被解析，因此去重后保留的是带已连接标记的那一条。
+func dedupeNetworks(networks []WiFiNetwork) []WiFiNetwork {
+	seen := make(map[string]bool, len(networks))
+	unique := make([]WiFiNetwork, 0, len(networks))
+
+	for _, network := range networks {
+		key := fmt.Sprintf("%s|%d|%s", network.ESSID, network.Channel, network.Freq)
+		if seen[key] {
+			continue
+		}
+
+		seen[key] = true
+		unique = append(unique, network)
+	}
+
+	return unique
 }
 
 // sortNetworks 已连接的置顶，其余按信号从强到弱排序。
@@ -373,13 +549,6 @@ func findMacOSWireless(interfaces []net.Interface) ([]WirelessInterface, error) 
 	return devices, nil
 }
 
-// hardwarePort 是 networksetup 输出的一个硬件端口。
-type hardwarePort struct {
-	Port            string
-	Device          string
-	EthernetAddress string
-}
-
 // parseHardwarePorts 解析 networksetup 输出，仅保留无线端口。
 func parseHardwarePorts(raw string) []hardwarePort {
 	var ports []hardwarePort
@@ -444,16 +613,16 @@ func macOSProfile() string {
 }
 
 // parseMacOSProfile 从 profiler 文本中取出接口型号与无线网络。
-// JSON 输出不含 SSID，只能走文本；此处依赖其固定缩进层级：
-// 接口 8、接口属性 10、SSID 12、SSID 属性 14。
+// JSON 输出不含 SSID，只能走文本；解析按相对缩进进行而不写死层级，
+// 避免不同 macOS 版本或权限下的排版差异导致漏读。
 func parseMacOSProfile(profile string) (map[string]string, []WiFiNetwork) {
 	var (
-		cardTypes = make(map[string]string)
-		networks  []WiFiNetwork
-		iface     string
-		current   WiFiNetwork
-		inNetwork bool
-		connected bool
+		cardTypes     = make(map[string]string)
+		networks      []WiFiNetwork
+		iface         string
+		current       WiFiNetwork
+		sectionIndent = -1
+		connected     bool
 	)
 
 	flush := func() {
@@ -470,24 +639,36 @@ func parseMacOSProfile(profile string) (map[string]string, []WiFiNetwork) {
 		}
 		indent := len(line) - len(strings.TrimLeft(line, " "))
 
-		switch {
-		case indent == 8 && strings.HasSuffix(text, ":"):
+		switch text {
+		case "Current Network Information:", "Other Local Wi-Fi Networks:":
 			flush()
-			inNetwork, iface = false, strings.TrimSuffix(text, ":")
-		case indent == 10 && strings.HasPrefix(text, "Card Type:"):
-			cardTypes[iface] = cardType(strings.TrimPrefix(text, "Card Type:"))
-		case indent == 10 && text == "Current Network Information:":
+			sectionIndent, connected = indent, text == "Current Network Information:"
+			continue
+		}
+
+		// 网络段之外：记录接口名与网卡型号。
+		if sectionIndent < 0 {
+			if strings.HasPrefix(text, "Card Type:") {
+				cardTypes[iface] = cardType(strings.TrimPrefix(text, "Card Type:"))
+			} else if strings.HasSuffix(text, ":") {
+				iface = strings.TrimSuffix(text, ":")
+			}
+			continue
+		}
+
+		if indent <= sectionIndent { // 段结束
 			flush()
-			inNetwork, connected = true, true
-		case indent == 10 && text == "Other Local Wi-Fi Networks:":
-			flush()
-			inNetwork, connected = true, false
-		case indent == 12 && inNetwork && strings.HasSuffix(text, ":"):
+			sectionIndent = -1
+			continue
+		}
+
+		if strings.HasSuffix(text, ":") { // 比段头更深、以冒号结尾的是 SSID
 			flush()
 			current = WiFiNetwork{ESSID: strings.TrimSuffix(text, ":"), Device: iface, Connected: connected}
-		case indent == 14 && inNetwork:
-			readMacOSNetworkField(&current, text)
+			continue
 		}
+
+		readMacOSNetworkField(&current, text)
 	}
 
 	flush()
@@ -503,24 +684,44 @@ func readMacOSNetworkField(network *WiFiNetwork, text string) {
 	}
 
 	switch strings.TrimSpace(key) {
+	case "PHY Mode":
+		network.PHY = strings.TrimSpace(value)
 	case "Channel":
-		network.Channel, network.Freq = parseChannel(value)
+		network.Channel, network.Freq, network.ChannelWidth = parseChannel(value)
 	case "Security":
 		network.Enc, network.Auth = parseSecurity(value)
 	case "Signal / Noise":
-		network.Signal = leadingInt(value)
+		network.Signal, network.NoiseFloor = parseSignalNoise(value)
+		if network.NoiseFloor != 0 {
+			network.SNR = network.Signal - network.NoiseFloor
+		}
+	case "MCS Index":
+		network.MCSIndex = leadingInt(value)
 	case "Transmit Rate":
 		network.Rate = leadingInt(value)
 	}
 }
 
-// parseChannel 从 “157 (5GHz, 80MHz)” 拆出信道号与频段。
-func parseChannel(raw string) (int, string) {
+// parseChannel 从 “157 (5GHz, 80MHz)” 拆出信道号、频段与带宽。
+func parseChannel(raw string) (channel int, band string, width int) {
 	if matches := channelPattern.FindStringSubmatch(raw); matches != nil {
-		return atoi(matches[1]), matches[2]
+		return atoi(matches[1]), matches[2], atoi(matches[3])
 	}
 
-	return leadingInt(raw), ""
+	return leadingInt(raw), "", 0
+}
+
+// parseSignalNoise 从 “-56 dBm / -91 dBm” 拆出信号与噪声。
+func parseSignalNoise(raw string) (signal int, noise int) {
+	values := intPattern.FindAllString(raw, -1)
+	if len(values) > 0 {
+		signal = atoi(values[0])
+	}
+	if len(values) > 1 {
+		noise = atoi(values[1])
+	}
+
+	return signal, noise
 }
 
 // parseSecurity 把 “WPA2 Personal” 拆成加密方式与认证方式。
