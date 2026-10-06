@@ -34,11 +34,70 @@ var verdictColumns = []tableColumn[verdictRow]{
 	},
 }
 
+// eapColumns 以对照表呈现常见 EAP 方法的安全态势，与法规对照表共用渲染设施。
+var eapColumns = []tableColumn[eapRow]{
+	{
+		Header: "EAP 方法",
+		Value: func(r eapRow) string {
+			return r.Method
+		},
+	},
+	{
+		Header: "内层认证",
+		Value: func(r eapRow) string {
+			return r.Inner
+		},
+		Priority: 1,
+	},
+	{
+		Header:   "态势",
+		Value:    func(r eapRow) string { return r.Posture },
+		Color:    eapColor,
+		Priority: 2,
+	},
+}
+
+// eapRows 是常见 EAP 方法的安全态势知识库，按从强到弱排列。
+// PEAP 与 EAP-TTLS 的安全完全取决于终端是否强制校验服务器证书，故列为条件性；
+// EAP-MD5 无服务器认证且无法建立加密隧道，LEAP 的 MSCHAPv1 已被攻破，均属弱方法。
+var eapRows = []eapRow{
+	{
+		Method:  "EAP-TLS",
+		Inner:   "双向证书",
+		Posture: "稳固",
+	},
+	{
+		Method:  "EAP-TTLS",
+		Inner:   "TLS 隧道 + PAP/CHAP",
+		Posture: "条件性",
+	},
+	{
+		Method:  "PEAP",
+		Inner:   "TLS 隧道 + MSCHAPv2",
+		Posture: "条件性",
+	},
+	{
+		Method:  "EAP-MD5",
+		Inner:   "MD5 散列，无隧道",
+		Posture: "弱",
+	},
+	{
+		Method:  "LEAP",
+		Inner:   "MSCHAPv1",
+		Posture: "弱",
+	},
+}
+
 // verdictRow 是法规对照表的一行：某法规域对目标信道的判定。
 type verdictRow struct {
 	Code, Country string
 	Status        radio.ChannelVerdict
 	Current       bool // 是否为内核当前生效的法规域
+}
+
+// eapRow 是 EAP 方法态势对照表的一行。
+type eapRow struct {
+	Method, Inner, Posture string
 }
 
 // rowCountry 在内核当前生效的法规域后标出 ←。
@@ -217,6 +276,13 @@ func explainSecurity(network *WiFiNetwork) {
 
 	fmt.Println(line)
 
+	// 企业级（802.1X）与个人级的攻击面完全不同，分开评估：
+	// 个人级围绕口令强度，企业级围绕 EAP 方法与 RADIUS 基础设施。
+	if isEnterprise(network.Auth) {
+		explainEnterprise(network)
+		return
+	}
+
 	for _, note := range securityNotes(network) {
 		fmt.Printf("  %s\n", note)
 	}
@@ -241,11 +307,9 @@ func securityNotes(network *WiFiNetwork) []string {
 			"结论：仅作过渡兼容存在，可视作弱加密目标。",
 		}
 	case "WPA2":
-		notes := []string{}
-		if strings.Contains(network.Auth, "PSK") || network.Auth == "" {
-			notes = append(notes, "PSK 模式：四次握手（含 PMKID 免握手抓取）可被嗅探后离线字典爆破，口令强度是唯一短板。")
-		} else {
-			notes = append(notes, "企业级认证（802.1X/RADIUS）：无 PSK 弱口令面，攻击面转向认证基础设施。")
+		// 本函数只处理个人级；企业级（802.1X）已由 explainSecurity 分流到 explainEnterprise。
+		notes := []string{
+			"PSK 模式：四次握手（含 PMKID 免握手抓取）可被嗅探后离线字典爆破，口令强度是唯一短板。",
 		}
 
 		if network.Cipher == "TKIP" {
@@ -261,6 +325,51 @@ func securityNotes(network *WiFiNetwork) []string {
 		}
 	default:
 		return []string{"未识别的加密代际，无法给出攻击面评估。"}
+	}
+}
+
+// isEnterprise 判定网络是否为 802.1X 企业级认证；
+// 各平台解析器已把企业级统一归一到 "802.1X" 这个标记。
+func isEnterprise(auth string) bool {
+	return strings.Contains(auth, "802.1X")
+}
+
+// explainEnterprise 评估 802.1X 企业级网络的攻击面。
+// 协议边界必须讲清：EAP 方法由关联后的 EAPOL 协商产生，Beacon/Probe Response
+// 只携带 AKM 套件（即“我是 802.1X”这件事本身），被动扫描在协议上不可能得知
+// 目标实际使用哪种 EAP，因此给出态势对照表，而不是伪造一个识别结果。
+func explainEnterprise(network *WiFiNetwork) {
+	lines := []string{
+		"  企业级认证（802.1X/RADIUS）：无 PSK 弱口令面，攻击面转向 EAP 方法与认证基础设施。",
+		"  EAP 方法不随信标广播，需 EAPOL 协商或嗅探才能确定，常见方法的态势对照如下：",
+	}
+
+	if network.Enc == "WPA3" {
+		lines = append(lines, "  WPA3 企业级可选 192 位 CNSA 模式：GCMP-256 套件并禁用 TLS 1.2 以下，强度进一步提升。")
+	}
+
+	fmt.Println(strings.Join(lines, "\n"))
+
+	renderTable("常见 EAP 方法安全态势", eapColumns, eapRows)
+
+	warnings := []string{
+		"  弱方法重点排查 EAP-MD5 与 LEAP：前者无服务器认证且无法建立加密隧道，后者协议已被攻破。",
+		"  PEAP/EAP-TTLS 若终端未强制校验服务器证书，可被流氓 AP（hostapd-wpe 式）中间人收集 MSCHAPv2 凭证，离线爆破即得域口令。",
+		"  企业环境价值：凭证即员工域账号，一次中间人得手直通内网，远比 PSK 目标有价值。",
+	}
+
+	fmt.Println(strings.Join(warnings, "\n"))
+}
+
+// eapColor 按态势着色：稳固绿、条件性黄、弱红，与全表风险语义一致。
+func eapColor(posture string) string {
+	switch posture {
+	case "稳固":
+		return constants.ColorGreen
+	case "条件性":
+		return constants.ColorYellow
+	default:
+		return constants.ColorRed
 	}
 }
 

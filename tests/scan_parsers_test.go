@@ -123,6 +123,22 @@ func TestParseIWScanWPA3AndWEP(t *testing.T) {
 			wantAuth:    "",
 			wantChannel: 6,
 		},
+		{
+			name: "企业级 802.1X 认证套件",
+			output: "BSS 66:77:88:99:aa:bb(on wlan0)\n" +
+				"\tfreq: 5180\n" +
+				"\tsignal: -65.00 dBm\n" +
+				"\tSSID: CorpNet\n" +
+				"\tcapability: ESS Privacy (0x00000011)\n" +
+				"\tRSN:\t * Version: 1\n" +
+				"\t\t * Group cipher: CCMP\n" +
+				"\t\t * Pairwise ciphers: CCMP\n" +
+				"\t\t * Authentication suites: 802.1X\n",
+			wantEnc:     "WPA2",
+			wantCipher:  "CCMP",
+			wantAuth:    "802.1X",
+			wantChannel: 36,
+		},
 	}
 
 	for _, tt := range tests {
@@ -227,6 +243,26 @@ func TestParseNetshBSSIDOutput(t *testing.T) {
 				}
 				if n.PHY != "802.11ax" {
 					t.Errorf("无线电类型错误：%s", n.PHY)
+				}
+			},
+		},
+		{
+			name: "英文系统 WPA2 企业级映射 802.1X",
+			output: "Interface name : Wi-Fi\r\n" +
+				"There are 1 networks currently visible.\r\n\r\n" +
+				"SSID 1 : CorpNet\r\n" +
+				"    Network type            : Infrastructure\r\n" +
+				"    Authentication          : WPA2-Enterprise\r\n" +
+				"    Encryption              : CCMP\r\n" +
+				"    BSSID 1                 : 66:77:88:99:aa:bb\r\n" +
+				"         Signal             : 70%\r\n" +
+				"         Radio type         : 802.11ax\r\n" +
+				"         Channel            : 36\r\n",
+			wantCount: 1,
+			check: func(t *testing.T, networks []functions.WiFiNetwork) {
+				n := networks[0]
+				if n.Enc != "WPA2" || n.Auth != "802.1X" || n.Cipher != "CCMP" {
+					t.Errorf("企业级套件映射错误：%+v", n)
 				}
 			},
 		},
