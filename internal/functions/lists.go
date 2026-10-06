@@ -3,7 +3,6 @@ package functions
 import (
 	"bytes"
 	"context"
-
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,6 +44,26 @@ type tableColumn[T any] struct {
 	Color    func(string) string
 	Priority int
 	Shrink   bool
+}
+
+// termuxConnectionInfo 对应 termux-wifi-connection-info 的 JSON。
+type termuxConnectionInfo struct {
+	State     string `json:"supplicant_state"`
+	BSSID     string `json:"bssid"`
+	SSID      string `json:"ssid"`
+	RSSI      int    `json:"rssi"`
+	Frequency int    `json:"frequency"`
+	Speed     int    `json:"link_speed_mbps"`
+	Error     string `json:"error"`
+}
+
+// termuxScanEntry 对应旧版 termux-wifi-scaninfo 的 JSON 数组元素。
+type termuxScanEntry struct {
+	BSSID        string `json:"bssid"`
+	SSID         string `json:"ssid"`
+	RSSI         int    `json:"level"`
+	Frequency    int    `json:"frequency"`
+	Capabilities string `json:"capabilities"`
 }
 
 var (
@@ -437,6 +456,18 @@ func WifiList(arguments []string) error {
 	renderScanStatus(networks, time.Since(started))
 	renderTable(fmt.Sprintf("无线网络 · 共 %d 个", len(networks)), networkColumns, networks)
 
+	// 锁定模式追加目标深度解读：法规合规、DFS、安全态势与链路质量。
+	// 可选第二参数为国码（如 list CafeGuest MY），只从该法规域视角展开；
+	// 全量扫描不做解读，否则满屏网络会刷屏。
+	if target != "" {
+		country := ""
+		if len(arguments) > 1 {
+			country = arguments[1]
+		}
+
+		ExplainNetworks(networks, country)
+	}
+
 	return nil
 }
 
@@ -517,10 +548,7 @@ func bandLabel(freq int) string {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Linux：iw 主动扫描（每个 BSS 提供真实 BSSID、RSN 套件、信道带宽）
-// ---------------------------------------------------------------------------
-
 // scanLinuxNetworks 调用 iw 扫描周边网络。主动扫描需要 CAP_NET_ADMIN，
 // 未授权时内核返回 Operation not permitted，此时提示用户改用 sudo。
 func scanLinuxNetworks() ([]WiFiNetwork, error) {
@@ -561,18 +589,25 @@ func scanLinuxNetworks() ([]WiFiNetwork, error) {
 func ParseIWScanOutput(output, device string) []WiFiNetwork {
 	networks := make([]WiFiNetwork, 0)
 
-	var current *WiFiNetwork
-
-	// 套件区块状态：RSN/WPA 的子行没有所属标记，只能靠“上一区块头”定位。
-	var section string
-	var rsnGroup, rsnPairwise, rsnAKM string
-	var wpaGroup, wpaPairwise, wpaAKM string
-	var hasRSN, hasWPA bool
-
-	var hasHT, hasVHT, hasHE, hasEHT bool
-	var htSecondary string
-	var widthCode int
-	var widthText string
+	var (
+		current     *WiFiNetwork
+		section     string
+		rsnGroup    string
+		rsnPairwise string
+		rsnAKM      string
+		wpaGroup    string
+		wpaPairwise string
+		wpaAKM      string
+		hasRSN      bool
+		hasWPA      bool
+		hasHT       bool
+		hasVHT      bool
+		hasHE       bool
+		hasEHT      bool
+		htSecondary string
+		widthCode   int
+		widthText   string
+	)
 
 	flush := func() {
 		if current == nil {
@@ -611,7 +646,6 @@ func ParseIWScanOutput(output, device string) []WiFiNetwork {
 
 		trimmed := strings.TrimSpace(line)
 
-		// RSN/WPA 区块头及其子行都带 “*”；遇到普通字段行即视为区块结束。
 		if strings.HasPrefix(trimmed, "RSN:") {
 			section, hasRSN = "rsn", true
 		} else if strings.HasPrefix(trimmed, "WPA:") {
@@ -629,21 +663,24 @@ func ParseIWScanOutput(output, device string) []WiFiNetwork {
 
 			switch kind {
 			case "Group cipher":
-				if section == "rsn" {
+				switch section {
+				case "rsn":
 					rsnGroup = value
-				} else if section == "wpa" {
+				case "wpa":
 					wpaGroup = value
 				}
 			case "Pairwise ciphers":
-				if section == "rsn" {
+				switch section {
+				case "rsn":
 					rsnPairwise = value
-				} else if section == "wpa" {
+				case "wpa":
 					wpaPairwise = value
 				}
 			case "Authentication suites":
-				if section == "rsn" {
+				switch section {
+				case "rsn":
 					rsnAKM = strings.Join(values, " ")
-				} else if section == "wpa" {
+				case "wpa":
 					wpaAKM = strings.Join(values, " ")
 				}
 			}
@@ -833,9 +870,7 @@ func resolveIWWidth(hasHT bool, htSecondary string, code int, text string) int {
 	return 0
 }
 
-// ---------------------------------------------------------------------------
 // Windows：netsh 枚举（同一 SSID 的每个 BSSID 单独成行，提供真实 BSSID）
-// ---------------------------------------------------------------------------
 
 // scanWindowsNetworks 通过 netsh 扫描。netsh 无需管理员权限即可列出周边 BSS。
 func scanWindowsNetworks() ([]WiFiNetwork, error) {
@@ -979,30 +1014,6 @@ func mapNetshSecurity(auth, enc string) (security, akm, cipher string) {
 	return security, akm, cipher
 }
 
-// ---------------------------------------------------------------------------
-// Android / Termux：系统不开放原生扫描，只能借助 Termux:API 读取有限信息
-// ---------------------------------------------------------------------------
-
-// termuxConnectionInfo 对应 termux-wifi-connection-info 的 JSON。
-type termuxConnectionInfo struct {
-	State     string `json:"supplicant_state"`
-	BSSID     string `json:"bssid"`
-	SSID      string `json:"ssid"`
-	RSSI      int    `json:"rssi"`
-	Frequency int    `json:"frequency"`
-	Speed     int    `json:"link_speed_mbps"`
-	Error     string `json:"error"`
-}
-
-// termuxScanEntry 对应旧版 termux-wifi-scaninfo 的 JSON 数组元素。
-type termuxScanEntry struct {
-	BSSID        string `json:"bssid"`
-	SSID         string `json:"ssid"`
-	RSSI         int    `json:"level"`
-	Frequency    int    `json:"frequency"`
-	Capabilities string `json:"capabilities"`
-}
-
 // scanTermuxNetworks 优先尝试周边扫描；新版 Android 普遍封禁该接口，
 // 失败时退回只含当前连接网络的 connection-info，并在完全不可用时明确报错。
 func scanTermuxNetworks() ([]WiFiNetwork, error) {
@@ -1104,9 +1115,7 @@ func parseTermuxCapabilities(capabilities string) (security, cipher, akm string)
 	return security, cipher, akm
 }
 
-// ---------------------------------------------------------------------------
 // macOS 增强：root 下用 wdutil 补当前已连接网络的 BSSID
-// ---------------------------------------------------------------------------
 
 // enrichMacOSConnectedBSSID 在 root 运行时解析 `wdutil info`，
 // 把已连接网络的 BSSID 补上；普通权限下 wdutil 直接报错，静默忽略。
