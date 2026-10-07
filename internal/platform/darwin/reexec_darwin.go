@@ -3,6 +3,7 @@
 package darwin
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,80 +12,154 @@ import (
 	"time"
 )
 
-// BootstrapFlag 是授权自举实例的内部参数：经 open 激活的 .app 实例
-// 只负责触发定位弹窗并等待用户选择，不执行扫描等终端交互。
-const BootstrapFlag = "--wifisec-location-bootstrap"
+const (
+	// BootstrapFlag 是授权/扫描 helper 实例的内部参数：经 open 激活的
+	// .app 实例负责与系统交互（弹窗、扫描），不执行终端渲染。
+	BootstrapFlag = "--wifisec-location-bootstrap"
 
-// bootstrapPromptTimeout 是自举实例等待用户在弹窗中选择的最长时间。
-const bootstrapPromptTimeout = 120 * time.Second
+	// scanOutFlag 把 helper 结果文件路径传给 helper 实例。
+	// LaunchServices 不继承终端环境变量与文件描述符，故结果只能经文件回传。
+	scanOutFlag = "--wifisec-scan-out"
+)
 
-// HandleBootstrap 在进程由 LaunchServices 以自举模式拉起时接管进程：
-// 触发系统定位授权弹窗并等待结果，随后直接退出。
-// 返回 true 表示当前进程即自举实例，调用方必须立即结束进程。
+// helperPromptTimeout 是 helper 实例等待用户在系统弹窗中选择的最长时间。
+const helperPromptTimeout = 120 * time.Second
+
+// helperResult 是 helper 实例写回终端实例的结果文件结构。
+type helperResult struct {
+	Status   AuthorizationStatus `json:"status"`
+	Networks []Network           `json:"networks"`
+}
+
+// HandleBootstrap 在进程由 LaunchServices 以 helper 模式拉起时接管进程：
+// 完成定位授权（首次会弹系统窗）与 CoreWLAN 扫描，把结果原子写入
+// --wifisec-scan-out 指定的文件后退出。
+// 返回 true 表示当前进程即 helper 实例，调用方必须立即结束进程。
 func HandleBootstrap() bool {
-	isBootstrap := false
+	var outputPath string
 
-	for _, arg := range os.Args[1:] {
-		if arg == BootstrapFlag {
-			isBootstrap = true
-			break
+	args := os.Args[1:]
+	for i := 0; i < len(args); i++ {
+		if args[i] == BootstrapFlag {
+			// 标记存在即可，路径在其后一个参数中。
+			continue
+		}
+
+		if args[i] == scanOutFlag && i+1 < len(args) {
+			outputPath = args[i+1]
+			i++
 		}
 	}
 
-	if !isBootstrap {
+	if !hasBootstrapFlag() || outputPath == "" {
 		return false
 	}
 
-	RequestLocationAuthorization(bootstrapPromptTimeout)
+	status := RequestLocationAuthorization(helperPromptTimeout)
+	result := helperResult{Status: status}
+
+	if status.Authorized() {
+		// 已授权（含本轮弹窗刚授予）时扫描才会返回真实 BSSID；
+		// 失败时保持空列表，终端侧据此输出降级提示。
+		if networks, err := ScanNetworks(); err == nil {
+			result.Networks = networks
+		}
+	}
+
+	writeHelperResult(outputPath, result)
 	return true
 }
 
-// EnsureAuthorization 保证定位授权在终端调用场景下可被授予。
-//
-// 裸 CLI 在终端内请求定位时，TCC 的责任进程是终端宿主（系统终端 / IDE），
-// 宿主通常未声明 NSLocation 用途，系统因此静默丢弃弹窗请求。
-// 解决办法是把自己以 .app 形态经 LaunchServices 再激活一次：
-// 该实例的责任进程是应用自身，弹窗得以呈现；授权按签名身份落账后，
-// 终端内继续运行的同一二进制即可读到 BSSID。
-//
-// 返回最终授权状态；无法自举（go run、二进制脱离 bundle）时返回当前状态，
-// 由上层给出手动授权指引。
-func EnsureAuthorization(wait time.Duration) AuthorizationStatus {
-	status := LocationStatus()
-	if status != AuthNotDetermined {
-		return status
+// hasBootstrapFlag 仅判断当前进程是否为 helper 实例，
+// 与参数提取拆开以避免一次遍历里同时处理两种语义。
+func hasBootstrapFlag() bool {
+	for _, arg := range os.Args[1:] {
+		if arg == BootstrapFlag {
+			return true
+		}
 	}
+
+	return false
+}
+
+// writeHelperResult 以 0600 权限、临时文件 + rename 的方式原子落盘，
+// 终端轮询到文件时内容必然完整，不会读到半截 JSON。
+func writeHelperResult(outputPath string, result helperResult) {
+	payload, err := json.Marshal(result)
+	if err != nil {
+		return
+	}
+
+	// 目录由终端实例创建（0700）；此处失败说明路径不可信，直接放弃回传。
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o700); err != nil {
+		return
+	}
+
+	temporaryPath := outputPath + ".tmp"
+	if err := os.WriteFile(temporaryPath, payload, 0o600); err != nil {
+		return
+	}
+
+	_ = os.Rename(temporaryPath, outputPath)
+}
+
+// ScanViaHelper 经 LaunchServices 唤起 .app helper 实例完成授权与扫描，
+// 等待并回收其结果文件。终端内进程的 TCC 责任进程归属终端宿主，
+// 无法直接获得定位授权与未脱敏 BSSID，必须经由 helper 身份完成。
+func ScanViaHelper(wait time.Duration) ([]Network, AuthorizationStatus, error) {
+	outputPath, err := helperOutputPath()
+	if err != nil {
+		return nil, AuthNotDetermined, err
+	}
+	defer os.Remove(outputPath)
 
 	bundlePath, err := ownBundlePath()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[诊断] 定位 bundle 失败：%v\n", err)
-		return status
+		return nil, AuthNotDetermined, err
 	}
 
 	// -n 强制新实例：与终端内当前实例并存，互不抢占。
-	open := exec.Command("open", "-n", bundlePath, "--args", BootstrapFlag)
-	if err := open.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "[诊断] open 启动失败：%v\n", err)
-		return status
+	open := exec.Command("open", "-n", bundlePath, "--args",
+		BootstrapFlag, scanOutFlag, outputPath)
+	if err := open.Run(); err != nil {
+		return nil, AuthNotDetermined, fmt.Errorf("启动定位 helper 失败：%w", err)
 	}
 
 	deadline := time.Now().Add(wait)
-	ticker := time.NewTicker(500 * time.Millisecond)
+	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		if status = LocationStatus(); status != AuthNotDetermined {
-			fmt.Fprintf(os.Stderr, "[诊断] 授权状态变为 %d，结束等待\n", status)
-			return status
+		payload, err := os.ReadFile(outputPath)
+		if err == nil {
+			var result helperResult
+			if json.Unmarshal(payload, &result) == nil {
+				return result.Networks, result.Status, nil
+			}
 		}
 
 		if time.Now().After(deadline) {
-			fmt.Fprintf(os.Stderr, "[诊断] 等待授权超时（%s），状态仍为未决定\n", wait)
-			return status
+			return nil, AuthNotDetermined, fmt.Errorf("等待定位 helper 超时（%s）", wait)
 		}
 	}
 
-	return status
+	return nil, AuthNotDetermined, nil
+}
+
+// helperOutputPath 在用户缓存目录下生成本次调用专属的结果文件路径，
+// 并发多次 list 互不覆盖；目录权限 0700，仅当前用户可访问。
+func helperOutputPath() (string, error) {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+
+	directory := filepath.Join(cacheDir, "wifisec")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return "", err
+	}
+
+	return filepath.Join(directory, fmt.Sprintf("scan-%d-%d.json", os.Getpid(), time.Now().UnixNano())), nil
 }
 
 // ownBundlePath 依据当前可执行文件路径反查所属 .app bundle 根目录。
@@ -102,7 +177,6 @@ func ownBundlePath() (string, error) {
 		executable = resolved
 	}
 
-	// 期望形态：<Foo.app>/Contents/MacOS/<binary>。
 	marker := ".app" + string(os.PathSeparator)
 	index := strings.LastIndex(executable, marker)
 	if index < 0 {

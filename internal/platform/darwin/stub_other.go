@@ -16,9 +16,9 @@ func HandleBootstrap() bool {
 	return false
 }
 
-// EnsureAuthorization 在非 macOS 上无定位授权概念，直接返回受限。
-func EnsureAuthorization(wait time.Duration) AuthorizationStatus {
-	return AuthRestricted
+// ScanViaHelper 在非 macOS 上无 CoreWLAN 数据源。
+func ScanViaHelper(wait time.Duration) ([]Network, AuthorizationStatus, error) {
+	return nil, AuthRestricted, nil
 }
 
 // LocationStatus 在非 macOS 上恒为受限。

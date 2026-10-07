@@ -10,41 +10,38 @@ import (
 	platformdarwin "wifisec/internal/platform/darwin"
 )
 
-// authorizationWaitTimeout 是终端实例等待自举授权完成的最长时间，
-// 与自举实例弹窗等待时长保持一致，留出系统动画余量。
-const authorizationWaitTimeout = 120 * time.Second
+// helperWaitTimeout 是终端实例等待 helper（系统弹窗 + CoreWLAN 扫描）
+// 回传结果的最长时间，必须覆盖用户阅读弹窗文案并做出选择的时间。
+const helperWaitTimeout = 120 * time.Second
 
-// enrichMacOSBSSID 通过 CoreWLAN 补全所有接入点（含未连接网络）的真实 BSSID。
-// macOS 隐私模型把 BSSID 归类为精确位置信息。
+// enrichMacOSBSSID 通过 helper 架构补全所有接入点（含未连接网络）的真实 BSSID。
 //
-// 终端内进程查询 CLLocationManager 状态时，TCC 会把责任归到终端宿主而非
-// wifisec 自身，状态值不能作为唯一判据；因此一律以「实际扫描是否返回 BSSID」
-// 为准：先扫一次，未脱敏直接使用；全部为空且尚未决定授权时，经 .app 自举
-// 弹出系统授权窗，授权落账后再扫一次。拒绝、受限或超时时不打断扫描主流程。
+// macOS TCC 模型下，终端内进程的「责任进程」归属终端宿主（系统终端 / IDE），
+// 该链路永远无法直接获得定位授权或未脱敏 BSSID；真正持有授权的是经
+// LaunchServices 激活的 wifisec.app。因此主流程先做一次零成本直接扫描
+// （兼容未来系统行为变化与已声明定位用途的终端），未获 BSSID 时唤起
+// .app helper：由它弹系统授权窗、执行扫描，结果经文件回传，终端负责渲染。
 func enrichMacOSBSSID(networks []WiFiNetwork) {
-	// sudo（root）进程位于当前登录用户的 GUI 会话之外，系统不会呈现 TCC 弹窗，
-	// LaunchServices 自举同样无法交互。root 下只做一次直接扫描尝试。
-	if os.Geteuid() == 0 {
-		if fillBSSIDFromCoreWLAN(networks) {
-			return
-		}
+	// 快速路径：当前进程直接能拿到（已授权的终端宿主、或系统策略放宽）。
+	if mergeCoreWLANScan(networks) {
+		return
+	}
 
+	// root 进程位于当前登录用户的 GUI 会话之外，无法呈现 TCC 弹窗，
+	// 也不能替当前用户唤起可交互的 LaunchServices helper。
+	if os.Geteuid() == 0 {
 		fmt.Printf("%s提示：扫描不需要 sudo，改用普通权限运行并允许定位后可显示全部 BSSID%s\n",
 			constants.ColorGray, constants.ColorReset)
 		return
 	}
 
-	// 首次直接扫描：已授权（含授权绑定在应用签名、而非终端责任链上的情况）
-	// 时立刻拿到 BSSID，无需任何弹窗打扰。
-	if fillBSSIDFromCoreWLAN(networks) {
-		return
-	}
+	// 正式路径：唤起 .app helper。首次使用系统会弹定位窗，点「允许」即可；
+	// 已授权后 helper 静默完成，不再打扰。
+	fmt.Println("正在通过 macOS 定位服务获取 BSSID… 首次使用请在系统弹窗中点「允许」。")
 
-	if platformdarwin.LocationStatus() == platformdarwin.AuthNotDetermined {
-		fmt.Println("macOS 将 Wi-Fi BSSID 视为精确位置信息，系统即将弹出定位授权，请选择「允许」。")
-		platformdarwin.EnsureAuthorization(authorizationWaitTimeout)
-		// 授权落账后的第二次扫描才是真正的结果判据。
-		if fillBSSIDFromCoreWLAN(networks) {
+	cwNetworks, status, err := platformdarwin.ScanViaHelper(helperWaitTimeout)
+	if err == nil && status.Authorized() {
+		if mergeNetworks(networks, cwNetworks) {
 			return
 		}
 	}
@@ -55,16 +52,22 @@ func enrichMacOSBSSID(networks []WiFiNetwork) {
 	}
 }
 
-// fillBSSIDFromCoreWLAN 执行 CoreWLAN 扫描并把结果合并进 system_profiler 主数据。
-// 返回 true 表示本次扫描实际带回了至少一个真实 BSSID；扫描失败、结果为空、
-// 或系统因未授权而把 BSSID 全部脱敏时返回 false，供调用方决定是否发起授权。
-func fillBSSIDFromCoreWLAN(networks []WiFiNetwork) bool {
+// mergeCoreWLANScan 在当前进程内直接执行 CoreWLAN 扫描并合并。
+// 返回 true 表示本次扫描实际带回了至少一个真实 BSSID。
+func mergeCoreWLANScan(networks []WiFiNetwork) bool {
 	cwNetworks, err := platformdarwin.ScanNetworks()
 	if err != nil || len(cwNetworks) == 0 {
 		return false
 	}
 
+	return mergeNetworks(networks, cwNetworks)
+}
+
+// mergeNetworks 把一批 CoreWLAN 扫描结果合并进主表，
+// 返回这批数据中是否存在真实 BSSID。
+func mergeNetworks(networks []WiFiNetwork, cwNetworks []platformdarwin.Network) bool {
 	hadBSSID := false
+
 	for _, cw := range cwNetworks {
 		if bssidPresent(cw.BSSID) {
 			hadBSSID = true
