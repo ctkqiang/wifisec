@@ -26,14 +26,12 @@ func (d *Developer) String() string {
 			"  微信         : %s\n"+
 			"  版本         : %s\n"+
 			"  项目URL      : %s\n"+
-			strings.Repeat("=", 60)+"\n"+
-			"  会话ID       : %s",
+			strings.Repeat("=", 60)+"\n",
 		d.Name,
 		d.Organisation,
 		d.Email,
 		d.Weixin,
 		d.Version,
 		d.ProjectUrl,
-		strings.ToUpper(d.SessionId),
 	)
 }

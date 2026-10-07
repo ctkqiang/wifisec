@@ -6,6 +6,7 @@ import (
 	"syscall"
 	"wifisec/internal/constants"
 	"wifisec/internal/functions"
+	platformdarwin "wifisec/internal/platform/darwin"
 	"wifisec/internal/utilities"
 )
 
@@ -25,6 +26,12 @@ func init() {
 }
 
 func main() {
+	// macOS 定位授权自举实例：由 LaunchServices 激活，只弹授权窗不做终端交互，
+	// 必须在任何子命令分发之前接管并退出。
+	if platformdarwin.HandleBootstrap() {
+		os.Exit(0)
+	}
+
 	sessionSignalChannel := make(chan os.Signal, 1)
 
 	utilities.Init(defaultMinLevel)

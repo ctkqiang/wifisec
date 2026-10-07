@@ -484,6 +484,8 @@ func scanNetworks() ([]WiFiNetwork, error) {
 	case utilities.GetOS() == utilities.Darwin:
 		_, networks := parseMacOSProfile(macOSProfile())
 		enrichMacOSConnectedBSSID(networks)
+		// CoreWLAN 补全未连接网络的 BSSID：macOS 要求定位授权，首次运行会弹窗。
+		enrichMacOSBSSID(networks)
 		return dedupeNetworks(networks), nil
 	case utilities.GetOS() == utilities.Windows:
 		return scanWindowsNetworks()
