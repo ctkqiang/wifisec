@@ -15,6 +15,7 @@ var (
 	commandHandlers = map[string]utilities.CommandFunction{
 		"deauth": functions.WifiDeauther,
 		"list":   functions.WifiList,
+		"serial": functions.Serial,
 		"help":   functions.HelpUsage,
 	}
 )
