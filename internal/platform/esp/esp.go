@@ -14,8 +14,11 @@
 package esp
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -75,11 +78,12 @@ type Network struct {
 
 // Injector 封装串口句柄，实现 deauther 的 frameWriter / channelSetter 契约。
 type Injector struct {
-	port    serial.Port
-	channel int    // 当前注入信道；逐帧随注入命令下发，这里仅缓存
-	version byte   // 握手时固件上报的协议版本
-	caps    byte   // 握手时固件上报的能力位图（CapBand5GHz 等）
-	rx      []byte // 跨 Read 调用累积的未解析字节流
+	port       serial.Port
+	channel    int    // 当前注入信道；逐帧随注入命令下发，这里仅缓存
+	version    byte   // 握手时固件上报的协议版本
+	caps       byte   // 握手时固件上报的能力位图（CapBand5GHz 等）
+	rx         []byte // 跨 Read 调用累积的未解析字节流
+	observedRx bool   // 握手期间是否收到过任何字节；用于区分「固件不对」与「链路不通」
 }
 
 // Open 打开指定串口并完成固件握手后才返回。
@@ -90,7 +94,7 @@ func Open(portName string) (*Injector, error) {
 
 	port, err := serial.Open(portName, mode)
 	if err != nil {
-		return nil, fmt.Errorf("打开串口 %s 失败：%w", portName, err)
+		return nil, fmt.Errorf("打开串口 %s 失败：%w%s", portName, err, busyHint(portName, err))
 	}
 
 	// 读取必须带超时，否则固件未响应时会永久阻塞。
@@ -311,7 +315,15 @@ func (i *Injector) handshake() error {
 		return nil
 	}
 
-	return errors.New("固件握手失败：请确认已烧录 wifisec 固件（core/esp/esp.ino），且波特率为 115200")
+	// 握手期间收到过字节，说明板子和串口链路是通的，
+	// 问题在固件内容：没烧录、烧的是别的 sketch、或版本过旧。
+	if i.observedRx {
+		return errors.New("固件握手失败：串口有数据但不是有效 PONG，固件可能未烧录或版本过旧，请烧录 core/esp/esp.ino 最新固件")
+	}
+
+	// 一个字节都没收到，问题在链路层：板子没跑起来（供电不足、
+	// 处于下载模式）或串口根本没对上（线材、hub、选错端口）。
+	return errors.New("固件握手失败：串口完全无数据；请确认板载 LED 有 3 次快闪 + 0.5 秒心跳（无则说明固件未运行），数据线直连电脑而非经 hub，并用 wifisec serial 确认端口")
 }
 
 // readFrame 读取一帧回复，timeout 是本帧的整体预算；
@@ -338,6 +350,10 @@ func (i *Injector) readFrame(timeout time.Duration) (byte, []byte, error) {
 			return 0, nil, errFrameTimeout
 		}
 
+		// 只要收到过字节就记录：握手失败时据此区分
+		// 「固件在说话但内容不对」与「链路层面一片死寂」。
+		i.observedRx = true
+
 		i.rx = append(i.rx, chunk[:n]...)
 
 		cmd, payload, rest, ok := DecodeReply(i.rx)
@@ -348,4 +364,47 @@ func (i *Injector) readFrame(timeout time.Duration) (byte, []byte, error) {
 		i.rx = rest
 		return cmd, payload, nil
 	}
+}
+
+// busyHint 在「端口被占用」时追加占用者身份信息。
+// 典型场景：Arduino IDE 串口监视器、上次异常退出的本程序仍持有端口，
+// 用户看到「busy」却不知道是谁占的，点名进程才能直接行动。
+func busyHint(portName string, openErr error) string {
+	if !strings.Contains(strings.ToLower(openErr.Error()), "busy") {
+		return ""
+	}
+
+	owner := portOwner(portName)
+	if owner == "" {
+		return "；端口被其他进程占用（可用 lsof " + portName + " 查看）"
+	}
+	return "；端口正被 " + owner + " 占用，关闭该进程后重试"
+}
+
+// portOwner 用 lsof 反查占用串口的进程名与 PID；仅 macOS/Linux 有效，
+// Windows 没有等价的无依赖命令，查不到时静默降级为通用提示。
+func portOwner(portName string) string {
+	if runtime.GOOS == "windows" {
+		return ""
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "lsof", "-nP", "--", portName).Output()
+	if err != nil {
+		return ""
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) < 2 {
+		return ""
+	}
+
+	fields := strings.Fields(lines[1])
+	if len(fields) < 2 {
+		return ""
+	}
+
+	return fmt.Sprintf("%s (PID %s)", fields[0], fields[1])
 }
