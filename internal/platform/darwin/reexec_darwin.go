@@ -57,12 +57,14 @@ func EnsureAuthorization(wait time.Duration) AuthorizationStatus {
 
 	bundlePath, err := ownBundlePath()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "[诊断] 定位 bundle 失败：%v\n", err)
 		return status
 	}
 
 	// -n 强制新实例：与终端内当前实例并存，互不抢占。
 	open := exec.Command("open", "-n", bundlePath, "--args", BootstrapFlag)
 	if err := open.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "[诊断] open 启动失败：%v\n", err)
 		return status
 	}
 
@@ -72,10 +74,12 @@ func EnsureAuthorization(wait time.Duration) AuthorizationStatus {
 
 	for range ticker.C {
 		if status = LocationStatus(); status != AuthNotDetermined {
+			fmt.Fprintf(os.Stderr, "[诊断] 授权状态变为 %d，结束等待\n", status)
 			return status
 		}
 
 		if time.Now().After(deadline) {
+			fmt.Fprintf(os.Stderr, "[诊断] 等待授权超时（%s），状态仍为未决定\n", wait)
 			return status
 		}
 	}
@@ -84,12 +88,18 @@ func EnsureAuthorization(wait time.Duration) AuthorizationStatus {
 }
 
 // ownBundlePath 依据当前可执行文件路径反查所属 .app bundle 根目录。
-// 通过符号链接（build/wifisec）启动时，os.Executable 返回链接目标的
-// 评估路径，因此两种调用方式都能定位到同一个 bundle。
+// 通过符号链接（build/wifisec）启动时先 EvalSymlinks 解析到 bundle 内
+// 二进制的真实路径，再向上截取 .app 根目录。
 func ownBundlePath() (string, error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return "", err
+	}
+
+	// build/wifisec 是指向 bundle 内二进制的符号链接，os.Executable 在 macOS
+	// 上返回符号链接自身路径，必须先解析到真实目标才能定位 .app。
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
 	}
 
 	// 期望形态：<Foo.app>/Contents/MacOS/<binary>。

@@ -1,0 +1,12 @@
+{
+    "configurations": [
+        {
+            "name": "wifisec list",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/cmd/main.go",
+            "args": ["list"]
+        }
+    ]
+}
