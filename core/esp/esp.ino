@@ -1,10 +1,9 @@
-#include <dummy.h>
-
-// wifisec ESP8266 串口注入固件（sketch 文件夹须命名为 wifisec，文件名须为 wifisec.ino，Arduino IDE 才能正确识别单一编译单元）
+// wifisec ESP8266 串口注入固件
+//
+// 本文件位于 core/esp/esp.ino，文件夹名 esp 与文件名 esp.ino 一致，
+// 符合 Arduino IDE 的 sketch 结构要求，可直接打开编译。
 //
 // 硬件：任意 ESP8266 开发板（NodeMCU / Wemos D1 mini 等），USB 连接宿主机。
-// 烧录：Arduino IDE 需把本文件放在名为 esp 的文件夹内（sketch 目录与文件名一致），
-//       或使用 arduino-cli compile --fqbn esp8266:esp8266:generic。
 //
 // 协议（小端，与 internal/platform/esp8266 一一对应）：
 //   主机→ESP: [0xA5][cmd][len_lo][len_hi][payload]

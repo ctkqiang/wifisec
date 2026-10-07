@@ -219,10 +219,10 @@ ESP→主机: [0x5A][cmd][len_lo][len_hi][payload]
 
 ### 5.4 固件烧录
 
-固件源码：[core/esp.ino](../../core/esp.ino)
+固件源码：[core/esp/esp.ino](../../core/esp/esp.ino)（目录结构已符合 Arduino 规范：文件夹名 `esp` 与文件名 `esp.ino` 一致）
 
 1. 安装 Arduino IDE 或 arduino-cli，添加 ESP8266 开发板支持（`esp8266:esp8266`）。
-2. **注意**：Arduino IDE 强制要求 sketch 文件夹名与 `.ino` 文件名一致，将 `core/esp.ino` 复制为 `esp/esp.ino` 再打开。
+2. 用 Arduino IDE 直接打开 `core/esp/esp.ino`。
 3. 开发板选择 `NodeMCU 1.0`（或对应型号），上传。
 4. 插入电脑，确认串口出现：
    - macOS：`ls /dev/cu.usbserial-*` 或 `/dev/cu.wchusbserial-*`
