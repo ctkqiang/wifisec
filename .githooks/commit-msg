@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HOOK_DIR/lib/common.sh"
+
+MSG_FILE="${1:-}"
+[ -n "$MSG_FILE" ] && [ -f "$MSG_FILE" ] || { err "git 未传入提交信息文件"; exit 2; }
+is_verify_disabled && exit 0
+is_merge_commit && exit 0
+
+TYPES='feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert'
+CJK_CLASS='[一-鿿〇]'
+
+fail() {
+  err "$1"
+  explain <<-EOT
+	要求格式：<type>(<scope>)!?: <中文描述>
+	正确示例：
+	  feat: 新增 IEEE 802.11 帧解析模块
+	  fix(darwin): 修复无 GUI 时定位授权弹窗被抑制的问题
+	  refactor(termux)!: 重构平台枚举逻辑，破坏旧版 API
+	  docs: 补充钩子规则说明
+	可选 type：feat fix docs style refactor perf test build ci chore revert
+	本仓库规则：提交描述必须使用中文
+	修改方式：git commit --amend 后重新编辑，或取消后重新提交
+	如需临时跳过（须有充分理由）：git commit --no-verify
+	EOT
+  exit 1
+}
+
+sed -i '' -e $'1s/^\xEF\xBB\xBF//' "$MSG_FILE" 2>/dev/null || sed -i -e $'1s/^\xEF\xBB\xBF//' "$MSG_FILE" 2>/dev/null || true
+
+[ -s "$MSG_FILE" ] || fail "提交信息为空"
+
+subject=''
+IFS= read -r subject <"$MSG_FILE" || true
+[ -n "$subject" ] || fail "提交信息为空"
+
+[ "${#subject}" -le 72 ] || fail "主题超过 72 字符（当前 ${#subject} 字符）：${subject:0:50}…"
+
+case "$subject" in
+  *$'\r'*) fail "主题包含 Windows 回车符（CR），请用 Unix 换行符" ;;
+esac
+if printf '%s\n' "$subject" | grep -qE '[[:space:]]$|\.$'; then
+  fail "主题不得以空白或句点结尾"
+fi
+
+if printf '%s\n' "$subject" | grep -qE '^(WIP|TODO|fixup!|squash!|Merge branch|Revert )'; then
+  fail "主题是占位符或草稿内容，不允许提交"
+fi
+
+if ! printf '%s\n' "$subject" | grep -qE "^(${TYPES})(\([^()[:space:]]+\))?!?: .+"; then
+  fail "主题不符合 Conventional Commits 格式：${subject}"
+fi
+
+desc="$(printf '%s\n' "$subject" | sed -E "s/^(${TYPES})(\([^()[:space:]]+\))?!?: //")"
+if ! printf '%s\n' "$desc" | grep -qE "${CJK_CLASS}"; then
+  fail "提交描述必须使用中文（当前描述无汉字）：${desc}"
+fi
+
+total_lines="$(awk 'END { print NR }' "$MSG_FILE")"
+if [ "$total_lines" -gt 1 ]; then
+  second_line="$(sed -n '2p' "$MSG_FILE")"
+  [ -z "$second_line" ] || fail "主题与正文之间必须空一行"
+  line_no=0
+  while IFS= read -r line; do
+    line_no=$((line_no + 1))
+    [ "$line_no" -eq 1 ] && continue
+    [ "${#line}" -le 72 ] || fail "正文第 ${line_no} 行超过 72 字符：${line:0:50}…"
+  done <"$MSG_FILE"
+fi
+
+ok "提交信息校验通过：${subject}"

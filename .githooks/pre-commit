@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HOOK_DIR/lib/common.sh"
+
+is_verify_disabled && exit 0
+
+SECRETS_RE='-----BEGIN (RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|gh[pousr]_[A-Za-z0-9]{36}|xox[baprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9]{20,}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}'
+BAD_PATHS='\.DS_Store$|\.log$|\.pem$|\.key$|\.p12$|\.keystore$'
+MAX_SIZE_BYTES=1048576
+
+FAILED=0
+fail_commit() {
+  FAILED=1
+  err "$1"
+}
+
+STAGED="$(staged_files || true)"
+if [ -z "$STAGED" ]; then
+  exit 0
+fi
+
+info "预提交检查：共 $(printf '%s\n' "$STAGED" | grep -c .) 个暂存文件"
+
+GO_FILES=''
+GO_PKGS=''
+
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/wifisec-precommit.XXXXXX")"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+while IFS= read -r file; do
+  if printf '%s\n' "$file" | grep -qiE -e "$BAD_PATHS"; then
+    fail_commit "禁止提交 ${file}（路径命中敏感/垃圾文件规则）"
+    continue
+  fi
+
+  if ! git diff --cached --check -- "$file"; then
+    fail_commit "${file} 存在空白错误或未解决的冲突标记（见上方输出）"
+  fi
+
+  size="$(git cat-file -s ":${file}" 2>/dev/null || echo 0)"
+  if [ "$size" -gt "$MAX_SIZE_BYTES" ]; then
+    fail_commit "${file} 体积 $((size / 1024)) KiB 超过 1 MiB 上限，疑似误提交二进制产物"
+  fi
+
+  blob_hits="$(git diff --cached -U0 -- "$file" | grep -E '^\+[^+]' | grep -nE -e "$SECRETS_RE" || true)"
+  if [ -n "$blob_hits" ]; then
+    fail_commit "${file} 新增行疑似包含硬编码凭据："
+    printf '%s\n' "$blob_hits" | sed 's/^/      /' >&2
+  fi
+
+  case "$file" in
+    *.go)
+      GO_FILES="${GO_FILES}${file}\n"
+      GO_PKGS="${GO_PKGS}$(dirname "$file")\n"
+      ;;
+  esac
+done <<<"$STAGED"
+
+if [ -n "$GO_FILES" ]; then
+  if ! have_cmd gofmt; then
+    warn "未找到 gofmt，跳过格式检查"
+  else
+    unformatted=0
+    while IFS= read -r file; do
+      blob_to_file "$file" "$TMP_DIR/check.go" || continue
+      if gofmt -l "$TMP_DIR/check.go" 2>/dev/null | grep -q .; then
+        fail_commit "${file} 未通过 gofmt 格式化（下方为差异，- 为应为，+ 为当前）："
+        gofmt -d "$TMP_DIR/check.go" >&2
+        unformatted=1
+      fi
+    done <<<"$(printf '%b' "$GO_FILES")"
+    [ "$unformatted" -eq 0 ] && ok "gofmt 检查通过"
+  fi
+
+  if ! have_cmd go; then
+    warn "未找到 go，跳过 go vet 检查"
+  else
+    pkgs="$(printf '%b' "$GO_PKGS" | sort -u | sed '/^$/d' | sed 's|^\./||; s|^|./|; s|$|/...|')"
+    if [ -n "$pkgs" ]; then
+      if ! go vet $pkgs; then
+        fail_commit "go vet 未通过（见上方输出）"
+      else
+        ok "go vet 检查通过：$(printf '%s' "$pkgs" | tr '\n' ' ')"
+      fi
+    fi
+  fi
+fi
+
+[ "$FAILED" -eq 0 ] && ok "预提交检查全部通过" || exit 1

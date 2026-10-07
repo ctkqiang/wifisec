@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HOOK_DIR/lib/common.sh"
+
+MSG_FILE="$1"
+SOURCE="$2"
+
+case "$SOURCE" in
+  message|template|merge|squash|commit) exit 0 ;;
+esac
+
+[ -n "${3:-}" ] && exit 0
+[ -s "$MSG_FILE" ] && exit 0
+
+CHANGED="$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)"
+
+cat >"$MSG_FILE" <<EOT
+
+# =============================================================================
+# 提交信息模板（以 # 开头的行不会被提交，请勿留空提交）
+#
+# 格式：<type>(<scope>)!?: <中文描述>
+#   type    feat fix docs style refactor perf test build ci chore revert
+#   scope   可选，如 darwin / termux / ieee80211
+#   !       破坏性变更标记
+#   描述    必须为中文，≤ 72 字符，不以句点结尾
+#
+# 示例：
+#   feat: 新增 IEEE 802.11 帧解析模块
+#   fix(darwin): 修复无 GUI 时定位授权弹窗被抑制的问题
+#
+# 多行正文时主题与正文之间空一行，正文每行 ≤ 72 字符。
+# =============================================================================
+EOT
+
+if [ -n "$CHANGED" ]; then
+  {
+    echo "# 本次变更文件："
+    printf '%s\n' "$CHANGED" | sed 's/^/#   /'
+    echo "#"
+  } >>"$MSG_FILE"
+fi

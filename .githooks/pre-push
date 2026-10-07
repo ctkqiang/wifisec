@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HOOK_DIR/lib/common.sh"
+
+is_verify_disabled && exit 0
+
+DELETIONS_ONLY=1
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$local_sha" in
+    0000000000000000000000000000000000000000) : ;;
+    *) DELETIONS_ONLY=0 ;;
+  esac
+done
+[ "$DELETIONS_ONLY" -eq 1 ] && exit 0
+
+if ! have_cmd go; then
+  warn "未找到 go，跳过推送前验证"
+  exit 0
+fi
+
+START="$(date +%s)"
+FAILED=0
+
+info "推送前验证：go vet ./..."
+if ! go vet ./...; then
+  err "go vet 未通过，已中止推送"
+  FAILED=1
+fi
+
+info "推送前验证：go test -count=1 ./..."
+if ! go test -count=1 ./...; then
+  err "go test 未通过，已中止推送"
+  FAILED=1
+fi
+
+ELAPSED="$(( $(date +%s) - START ))"
+if [ "$FAILED" -eq 0 ]; then
+  ok "推送前验证全部通过（耗时 ${ELAPSED}s）"
+else
+  err "推送前验证失败（耗时 ${ELAPSED}s），修复后重试；紧急情况可 git push --no-verify"
+  exit 1
+fi
