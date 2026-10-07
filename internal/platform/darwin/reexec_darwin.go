@@ -36,37 +36,47 @@ type helperResult struct {
 // --wifisec-scan-out 指定的文件后退出。
 // 返回 true 表示当前进程即 helper 实例，调用方必须立即结束进程。
 func HandleBootstrap() bool {
+	if !hasBootstrapFlag() {
+		return false
+	}
+
+	// helper 没有终端可输出，生命周期只能经排障日志观察。
+	helperDebugf("helper 启动，argv=%q", os.Args)
+
 	var outputPath string
 
 	args := os.Args[1:]
 	for i := 0; i < len(args); i++ {
-		if args[i] == BootstrapFlag {
-			// 标记存在即可，路径在其后一个参数中。
-			continue
-		}
-
 		if args[i] == scanOutFlag && i+1 < len(args) {
 			outputPath = args[i+1]
 			i++
 		}
 	}
 
-	if !hasBootstrapFlag() || outputPath == "" {
-		return false
+	if outputPath == "" {
+		helperDebugf("缺少 %s 参数，helper 无法回传结果，直接退出", scanOutFlag)
+		return true
 	}
 
+	helperDebugf("请求前 LocationStatus=%d", LocationStatus())
 	status := RequestLocationAuthorization(helperPromptTimeout)
+	helperDebugf("定位授权状态：%d", status)
 	result := helperResult{Status: status}
 
 	if status.Authorized() {
 		// 已授权（含本轮弹窗刚授予）时扫描才会返回真实 BSSID；
 		// 失败时保持空列表，终端侧据此输出降级提示。
-		if networks, err := ScanNetworks(); err == nil {
+		networks, err := ScanNetworks()
+		if err != nil {
+			helperDebugf("CoreWLAN 扫描失败：%v", err)
+		} else {
+			helperDebugf("CoreWLAN 扫描完成，共 %d 个接入点", len(networks))
 			result.Networks = networks
 		}
 	}
 
 	writeHelperResult(outputPath, result)
+	helperDebugf("结果已写入 %s, helper 退出", outputPath)
 	return true
 }
 
@@ -87,20 +97,50 @@ func hasBootstrapFlag() bool {
 func writeHelperResult(outputPath string, result helperResult) {
 	payload, err := json.Marshal(result)
 	if err != nil {
+		helperDebugf("结果序列化失败：%v", err)
 		return
 	}
 
 	// 目录由终端实例创建（0700）；此处失败说明路径不可信，直接放弃回传。
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o700); err != nil {
+		helperDebugf("创建结果目录失败：%v", err)
 		return
 	}
 
 	temporaryPath := outputPath + ".tmp"
 	if err := os.WriteFile(temporaryPath, payload, 0o600); err != nil {
+		helperDebugf("写入临时结果文件失败：%v", err)
 		return
 	}
 
-	_ = os.Rename(temporaryPath, outputPath)
+	if err := os.Rename(temporaryPath, outputPath); err != nil {
+		helperDebugf("原子改名结果文件失败：%v", err)
+	}
+}
+
+// helperDebugf 把 helper 生命周期追加写入用户缓存目录下的排障日志。
+// helper 由 LaunchServices 激活，没有标准输出可观察，落盘是唯一排障手段；
+// 任何一步失败都静默放弃，日志本身绝不能让 helper 崩溃。
+func helperDebugf(format string, args ...any) {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return
+	}
+
+	directory := filepath.Join(cacheDir, "wifisec")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return
+	}
+
+	file, err := os.OpenFile(filepath.Join(directory, "helper-debug.log"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	prefix := fmt.Sprintf("%s pid=%d ", time.Now().Format("2006-01-02 15:04:05.000"), os.Getpid())
+	fmt.Fprintf(file, prefix+format+"\n", args...)
 }
 
 // ScanViaHelper 经 LaunchServices 唤起 .app helper 实例完成授权与扫描，

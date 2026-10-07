@@ -10,7 +10,7 @@ package darwin
 
 /*
 #cgo CFLAGS: -x objective-c -fmodules -fobjc-arc
-#cgo LDFLAGS: -framework Foundation -framework CoreWLAN -framework CoreLocation
+#cgo LDFLAGS: -framework Foundation -framework AppKit -framework CoreWLAN -framework CoreLocation
 #cgo LDFLAGS: -Wl,-sectcreate,__TEXT,__info_plist,${SRCDIR}/Info.plist
 
 #include <stdlib.h>

@@ -7,6 +7,7 @@
 //   - 授权请求依赖 NSRunLoop 驱动 delegate 回调，因此请求期间显式运转当前 RunLoop。
 
 #import <Foundation/Foundation.h>
+#import <AppKit/AppKit.h>
 #import <CoreWLAN/CoreWLAN.h>
 #import <CoreLocation/CoreLocation.h>
 
@@ -48,6 +49,13 @@ int wifisec_location_request(int timeout_sec) {
         timeout_sec = 1;
     }
 
+    // 无窗口 CLI 进程必须显式完成 NSApplication 启动并置为 Accessory，
+    // 否则 LaunchServices 视其为“启动中”，TCC 授权弹窗被系统抑制，
+    // 授权回调永远等不到用户输入，进程只能挂起到超时。
+    NSApplication *application = [NSApplication sharedApplication];
+    [application setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    [application finishLaunching];
+
     CLLocationManager *manager = [[CLLocationManager alloc] init];
     if (manager.authorizationStatus != kCLAuthorizationStatusNotDetermined) {
         return (int)manager.authorizationStatus;
@@ -59,8 +67,16 @@ int wifisec_location_request(int timeout_sec) {
     [manager requestAlwaysAuthorization];
 
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:timeout_sec];
-    while (!delegate.finished && [[NSDate date] compare:deadline] == NSOrderedAscending) {
-        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:deadline];
+    NSDate *step = nil;
+
+    // delegate 回调只是加速器：无 App 事件循环时它不一定被投递，
+    // 因此每 0.2s 轮询一次状态，保证用户点完“允许”后循环必然退出。
+    while (!delegate.finished && manager.authorizationStatus == kCLAuthorizationStatusNotDetermined) {
+        step = [NSDate dateWithTimeIntervalSinceNow:0.2];
+        if ([step compare:deadline] == NSOrderedDescending) {
+            break;
+        }
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:step];
     }
 
     return (int)manager.authorizationStatus;
