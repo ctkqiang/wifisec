@@ -6,7 +6,7 @@
 - [2. 802.11 协议原理](#2-80211-协议原理)
 - [3. 帧结构设计](#3-帧结构设计)
 - [4. 架构与平台分发](#4-架构与平台分发)
-- [5. ESP8266 协处理器模式（默认）](#5-esp8266-协处理器模式默认)
+- [5. ESP 协处理器模式（默认）](#5-esp-协处理器模式默认)
 - [6. Linux 原生注入路径](#6-linux-原生注入路径)
 - [7. Windows Npcap 注入路径](#7-windows-npcap-注入路径)
 - [8. 使用方法](#8-使用方法)
@@ -29,9 +29,9 @@
 | 目标指定 | 必填参数，SSID（精确匹配）或 BSSID（大小写不敏感） |
 | 帧类型 | 广播 deauth（目标地址 `ff:ff:ff:ff:ff:ff`） |
 | 发送间隔 | 200ms，无总量上限 |
-| 默认注入后端 | ESP8266 串口协处理器（`EMBEDDED_MODE = true`） |
+| 默认注入后端 | ESP 串口协处理器（`EMBEDDED_MODE = true`） |
 
-支持注入的平台：Linux、Windows（Npcap）、Termux（需 root）、以及**任何可插 USB 串口的平台**（ESP8266 模式，含 macOS）。
+支持注入的平台：Linux、Windows（Npcap）、Termux（需 root）、以及**任何可插 USB 串口的平台**（ESP 协处理器模式，含 macOS）。
 
 ---
 
@@ -124,7 +124,7 @@ frame[radiotapHeaderLen] = byte(subtypeDeauth<<4 | typeManagement<<2) // = 0xC0
 │  internal/ieee80211   帧编解码（纯字节，无系统交互） │
 ├─────────────────────────────────────────────────┤
 │  Adapters                                        │
-│    platform/esp8266   USB 串口（全平台）           │
+│    platform/esp       USB 串口（全平台）             │
 │    platform/linux     AF_PACKET 原始套接字         │
 │    platform/windows   Npcap wpcap.dll            │
 └─────────────────────────────────────────────────┘
@@ -134,7 +134,7 @@ frame[radiotapHeaderLen] = byte(subtypeDeauth<<4 | typeManagement<<2) // = 0xC0
 
 | 平台 | 注入后端 | 权限要求 | 频段 | 关键依赖 |
 |:---|:---|:---|:---|:---|
-| 任意平台 + ESP8266 | 串口协处理器 | 无（Linux 需 dialout 组） | 仅 2.4GHz | ESP8266 板 + 烧录固件 |
+| 任意平台 + ESP 开发板 | 串口协处理器 | 无（Linux 需 dialout 组） | 2.4GHz（ESP32-C5 含 5GHz） | ESP8266/ESP32 板 + 烧录固件 |
 | Linux | AF_PACKET | root / CAP_NET_RAW | 2.4 + 5GHz | 网卡支持 monitor 模式 |
 | Termux (Android) | AF_PACKET | root | 2.4 + 5GHz | nexmon 固件或 NetHunter |
 | Windows | Npcap | 管理员 | 2.4 + 5GHz | Npcap（勾选 raw 802.11） |
@@ -168,31 +168,41 @@ type frameWriter interface {
 }
 ```
 
-三个注入适配器各自实现该接口，注入循环（`runDeauthLoop`）对后端完全无感知。这是 ESP8266 能作为「即插即用新后端」接入而核心逻辑零改动的原因。
+三个注入适配器各自实现该接口，注入循环（`runDeauthLoop`）对后端完全无感知。这是 ESP 协处理器能作为「即插即用新后端」接入而核心逻辑零改动的原因。
 
 ---
 
-## 5. ESP8266 协处理器模式（默认）
+## 5. ESP 协处理器模式（默认）
 
 ### 5.1 原理
 
 ```
-宿主机 ═══USB 数据线═══> ESP8266 ═══2.4GHz 射频═══> 目标客户端
-      （串口 UART，纯字节流）        （伪装的 deauth 帧）
+宿主机 ═══USB 数据线═══> ESP 开发板 ═══2.4/5GHz 射频═══> 目标客户端
+      （串口 UART，纯字节流）         （伪装的 deauth 帧）
 ```
 
-- 宿主机把 ESP8266 当作普通串口设备，**宿主机的 WiFi 能力完全不参与**——这是 macOS 唯一可行的注入路径。
-- ESP8266 **不需要连接任何 WiFi**（既不用连目标路由器，也不用开热点）。deauth 是伪造而非连接：帧的 addr2 冒充目标 AP 的 BSSID。
+- 宿主机把开发板当作普通串口设备，**宿主机的 WiFi 能力完全不参与**——这是 macOS 唯一可行的注入路径。
+- 开发板**不需要连接任何 WiFi**（既不用连目标路由器，也不用开热点）。deauth 是伪造而非连接：帧的 addr2 冒充目标 AP 的 BSSID。
 - 全程无需 root / 管理员权限。
 
 ### 5.2 硬件要求
 
+同一固件源码（`core/esp/esp.ino`）通过编译期宏自动适配以下板型：
+
+| 开发板 | 注入原语 | 频段 | 支持 |
+|:---|:---|:---|:---|
+| ESP8266（NodeMCU / Wemos D1 mini 等） | `wifi_send_pkt_freedom` | 2.4GHz（信道 1-14） | ✅ |
+| ESP32 经典 / C2 / C3 / S2 / S3 | `esp_wifi_80211_tx` | 2.4GHz（信道 1-14） | ✅ |
+| ESP32-C5 | `esp_wifi_80211_tx` | 2.4 + 5GHz（信道 1-14 / 36-165） | ✅ |
+| Arduino UNO + WiFi Shield（NINA/WINC） | 无开放注入 API | — | ❌ 编译期 `#error` |
+
 | 项目 | 要求 |
 |:---|:---|
-| 开发板 | 任意 ESP8266（NodeMCU / Wemos D1 mini 等） |
-| USB 芯片 | CH340 / CP2102（macOS 对 CH340 可能需装驱动） |
-| 频段 | 仅 2.4GHz（信道 1-14），5/6GHz 物理不可达 |
-| 价格 | 约 ¥15-25 |
+| USB 串口芯片 | CH340 / CP2102 / 板载 USB-JTAG（macOS 对 CH340 可能需装驱动） |
+| 数据线 | 必须是数据线，纯充电线没有 D+/D- |
+| 价格 | ESP8266 约 ¥15-25；ESP32 系列约 ¥20-60 |
+
+频段能力由固件在握手时以**能力位图**上报，主机不猜测板型：5GHz 目标（信道 > 14）在 2.4GHz 芯片上会被逐目标跳过并给出告警。
 
 ### 5.3 串口协议
 
@@ -208,15 +218,24 @@ ESP→主机: [0x5A][cmd][len_lo][len_hi][payload]
 | 主机→ESP | `0x00` | 无 | PING 握手；打开串口会复位板子，boot 期间命令必丢，需重试至收到 PONG |
 | 主机→ESP | `0x01` | 无 | 请求扫描（含隐藏 SSID） |
 | 主机→ESP | `0x02` | 信道(1) + 802.11 帧 | 注入；帧已剥 radiotap |
-| ESP→主机 | `0x00` | 协议版本(1) | PONG；boot 完成时也会主动上报一次 |
+| ESP→主机 | `0x00` | 协议版本(1) + 能力位图(1) | PONG；boot 完成时也会主动上报一次 |
 | ESP→主机 | `0x01` | bssid(6)+channel(1)+rssi(1)+ssidLen(1)+ssid | 扫描条目，逐条回传 |
 | ESP→主机 | `0x02` | 无 | 扫描结束 |
 | ESP→主机 | `0x04` | 出错命令(1)+错误码(1) | 错误 |
 
+能力位图（PONG 第 2 字节）：
+
+| bit | 含义 |
+|:---|:---|
+| 0 | 支持 5GHz 注入（当前仅 ESP32-C5） |
+| 1-7 | 保留，固定为 0 |
+
+向后兼容：旧固件 PONG 只回 1 字节版本号，主机按「无扩展能力」（仅 2.4GHz）处理，不会误判为损坏。
+
 设计取舍：
 
 - **先握手再干活**——打开串口触发板子复位，boot 需 1-2 秒；主机以 500ms 节奏重发 PING，收到 PONG（协议版本 1）才发扫描命令，冷启动/热启动时序通吃。
-- **噪声重同步**——ESP8266 上电以 74880 波特输出启动日志，在 115200 下呈现为随机字节；解析器逐字节丢弃直至帧头 `0x5A`，残缺帧保留待下一段拼齐。
+- **噪声重同步**——ESP 芯片上电以非工作波特率输出启动日志（ESP8266 为 74880），在 115200 下呈现为随机字节；解析器逐字节丢弃直至帧头 `0x5A`，残缺帧保留待下一段拼齐。
 - **注入不回 ACK**——每条确认都占串口带宽（115200 baud ≈ 11KB/s），持续注入场景下丢确认比丢帧更伤帧率。
 - **信道随帧携带**——`SetChannel` 在 Go 侧仅缓存，多目标轮发时无需额外串口往返。
 - **payload 上限 512 字节**——固件侧超长直接拒绝，防缓冲区溢出。
@@ -225,9 +244,9 @@ ESP→主机: [0x5A][cmd][len_lo][len_hi][payload]
 
 固件源码：[core/esp/esp.ino](../../core/esp/esp.ino)（目录结构已符合 Arduino 规范：文件夹名 `esp` 与文件名 `esp.ino` 一致）
 
-1. 安装 Arduino IDE 或 arduino-cli，添加 ESP8266 开发板支持（`esp8266:esp8266`）。
+1. 安装 Arduino IDE 或 arduino-cli，添加对应开发板支持：ESP8266 用 `esp8266:esp8266`，ESP32 系列用 `esp32:esp32`。
 2. 用 Arduino IDE 直接打开 `core/esp/esp.ino`。
-3. 开发板选择 `NodeMCU 1.0`（或对应型号），上传。
+3. 开发板选择对应型号（ESP8266 如 `NodeMCU 1.0`，ESP32 如 `ESP32C5 Dev Module`），上传。
 4. 插入电脑，确认串口出现：
    - macOS：`ls /dev/cu.usbserial-*` 或 `/dev/cu.wchusbserial-*`
    - Linux：`ls /dev/ttyUSB*`（用户需在 `dialout` 组）
@@ -235,7 +254,7 @@ ESP→主机: [0x5A][cmd][len_lo][len_hi][payload]
 
 ### 5.5 烧录排错
 
-**编译内存报表解读**：编译成功后 IDE 会输出分段占用，以下为正常范围（以本固件实测为例）：
+**编译内存报表解读**：编译成功后 IDE 会输出分段占用，以下为正常范围（以 ESP8266 实测为例；ESP32 分段名称不同但判读方法一致——编译器未报 `overflow` 即正常）：
 
 | 段 | 实测占用 | 判定 | 说明 |
 |:---|:---|:---|:---|
@@ -245,9 +264,9 @@ ESP→主机: [0x5A][cmd][len_lo][len_hi][payload]
 
 判定标准：编译器未对任何段报 `overflow` 错误即正常。IRAM 91% 是**每个** ESP8266 sketch 的基线水位，不是本固件的问题。
 
-**上传超时（`Failed to connect to ESP8266: Timed out waiting for packet header`）**：
+**上传超时（`Failed to connect: Timed out waiting for packet header`）**：
 
-ESP8266 必须在复位瞬间 GPIO0 拉低才能进入 UART 下载模式。开发板的自动复位电路（DTR/RTS）在 macOS + CH340 组合下经常失灵，esptool 同步不到 bootloader 即超时。按成功率排序：
+ESP 芯片必须在复位瞬间拉低 GPIO0（BOOT）才能进入 UART 下载模式。开发板的自动复位电路（DTR/RTS）在 macOS + CH340 组合下经常失灵，esptool 同步不到 bootloader 即超时。按成功率排序：
 
 1. **手动进下载模式**（首选）：按住 `FLASH`（或 `BOOT`）按钮不放 → 点按一下 `RST` → 松开 `FLASH` → 立即点上传。看到 `Writing at 0x00000000...` 即成功。
 2. **降低上传波特率**：`工具` → `Upload Speed` → `115200`。默认的 460800/921600 在部分 CH340 与线材组合下不稳定。
@@ -284,11 +303,11 @@ wifisec deauth <BSID> /dev/cu.usbserial-1410
 /dev/cu.Bluetooth-Incoming-Port  系统  -          -              -
 ```
 
-ESP8266 会先以自身射频扫描周边 2.4GHz 网络（顺便绕过了 macOS 对未连接网络 BSSID 的脱敏），锁定目标后进入注入循环。
+协处理器会先以自身射频扫描周边网络（2.4GHz 芯片只回 2.4GHz 结果，ESP32-C5 同时回 5GHz），顺便绕过了 macOS 对未连接网络 BSSID 的脱敏；锁定目标后进入注入循环。
 
 ### 5.7 LED 状态指示
 
-固件驱动板载 LED（`LED_BUILTIN`，NodeMCU/Wemos 为 GPIO2，低电平点亮），不看终端也能判断固件状态：
+固件驱动板载 LED（`LED_BUILTIN`；ESP8266 的 NodeMCU/Wemos 为 GPIO2 低电平点亮，多数 ESP32 开发板为高电平点亮，固件按芯片自动选择电平），不看终端也能判断固件状态：
 
 | LED 表现 | 状态 |
 |:---|:---|
@@ -430,10 +449,10 @@ EXIT
 
 | 配置 | 位置 | 默认值 | 说明 |
 |:---|:---|:---|:---|
-| `EMBEDDED_MODE` | [constant.go](../../internal/constants/constant.go#L8-L10) | `true` | 是否默认走 ESP8266 串口路径 |
+| `EMBEDDED_MODE` | [constant.go](../../internal/constants/constant.go#L8-L10) | `true` | 是否默认走 ESP 串口协处理器路径 |
 | 发送间隔 | deauther.go `sendInterval` | `200ms` | 每轮向所有目标发完后的固定间隔 |
-| 串口波特率 | esp8266.go `baudRate` | `115200` | 必须与固件 `Serial.begin` 一致 |
-| 扫描读超时 | esp8266.go `scanReadTimeout` | `15s` | 覆盖 ESP 完整扫描（约 2-3s）+ 串口回传 |
+| 串口波特率 | esp.go `baudRate` | `115200` | 必须与固件 `Serial.begin` 一致 |
+| 扫描读超时 | esp.go `scanReadTimeout` | `15s` | 覆盖 ESP 完整扫描（约 2-3s）+ 串口回传 |
 | monitor 命令超时 | linux/monitor.go `monitorTimeout` | `10s` | 单条 `iw`/`ip` 命令超时 |
 | 固件 payload 上限 | esp.ino `rxBuf` | `512B` | 超长帧直接拒绝 |
 
@@ -446,7 +465,8 @@ EXIT
 | `未发现 USB 串口设备` | ESP 未插入或驱动未装 | 检查数据线（须为数据线非充电线）；CH340 芯片装驱动 |
 | `发现多个 USB 串口设备` | 插了多个串口设备 | 把端口名作为第二参数传入 |
 | `等待固件响应超时` | 固件未烧录或波特率不匹配 | 重新烧录 [core/esp/esp.ino](../../core/esp/esp.ino) |
-| `未找到目标 X；注意 ESP8266 仅支持 2.4GHz` | 目标只在 5/6GHz 发射 | 换 Linux/Windows 原生路径，或确认目标有 2.4GHz 信号 |
+| `未找到目标 X；当前协处理器仅支持 2.4GHz` | 目标只在 5/6GHz 发射，且固件无双频能力 | 换 ESP32-C5 / Linux / Windows 原生路径，或确认目标有 2.4GHz 信号 |
+| `固件协议版本 vX 与本程序支持的 v1 不兼容` | 固件过旧或过新 | 重新烧录最新 [core/esp/esp.ino](../../core/esp/esp.ino) |
 | `打开原始套接字需要 root 权限或 CAP_NET_RAW` | Linux 未提权 | `sudo` 运行 |
 | `Operation not permitted`（iw 建 monitor） | 同上 | `sudo` 运行 |
 | `信道 N 不可用` | 网卡不支持该信道（常见 DFS 雷达信道） | 属正常现象，该目标自动跳过 |
@@ -467,22 +487,22 @@ EXIT
 ## 13. FAQ
 
 **Q1：为什么 macOS 上 `sudo` 也不能注入？**
-瓶颈不是权限而是平台能力。Apple 从系统框架层未开放 802.11 帧注入——CoreWLAN 只有扫描和关联接口，root 无法让不存在的 API 出现。macOS 的解决方案是 ESP8266 模式。
+瓶颈不是权限而是平台能力。Apple 从系统框架层未开放 802.11 帧注入——CoreWLAN 只有扫描和关联接口，root 无法让不存在的 API 出现。macOS 的解决方案是 ESP 协处理器模式。
 
-**Q2：ESP8266 需要连接目标路由器的 WiFi 吗？**
+**Q2：ESP 开发板需要连接目标路由器的 WiFi 吗？**
 不需要。deauth 是伪造而非连接：帧的 addr2 冒充目标 AP 的 BSSID，目标客户端以为路由器在说「你下线吧」。全程无需密码、无需认证、无需关联。
 
-**Q3：ESP8266 需要连接我电脑的 WiFi 吗？**
-不需要。电脑与 ESP8266 之间是 USB 串口线，不是 WiFi。电脑的 WiFi 状态完全无所谓，断网也能用。
+**Q3：ESP 开发板需要连接我电脑的 WiFi 吗？**
+不需要。电脑与开发板之间是 USB 串口线，不是 WiFi。电脑的 WiFi 状态完全无所谓，断网也能用。
 
 **Q4：Docker / 虚拟机里能跑原生注入吗？**
 Docker on macOS 的 Linux VM 没有任何无线设备，不可行。VMware/VirtualBox + **USB 网卡直通**可行（内置网卡的射频无法直通）。ESP 模式下虚拟机只要能映射 USB 串口即可。
 
 **Q5：为什么打了没效果？**
-按概率排查：① 目标是 WPA3 或启用了 PMF（协议层免疫）；② ESP8266 而目标只在 5GHz；③ 目标距离过远信号太弱；④ Linux/Windows 网卡实际不支持注入（能进 monitor 不代表能发）。
+按概率排查：① 目标是 WPA3 或启用了 PMF（协议层免疫）；② 协处理器是 2.4GHz 芯片而目标只在 5GHz（换 ESP32-C5 可解）；③ 目标距离过远信号太弱；④ Linux/Windows 网卡实际不支持注入（能进 monitor 不代表能发）。
 
 **Q6：发送速率能调吗？**
 修改 [deauther.go](../../internal/functions/deauther.go) 的 `sendInterval`。ESP 路径受 115200 波特率限制（约 280 帧/秒上限），200ms 间隔远未触顶。
 
 **Q7：如何测试 ESP 固件是否工作？**
-插上板子后运行 `wifisec deauth 任意名字`：能看到 `[INFO] 通过 ... 扫描周边 2.4GHz 网络…` 并返回「未找到目标」列表错误，说明串口双向通信与固件扫描均正常。
+插上板子后运行 `wifisec deauth 任意名字`：能看到 `[INFO] 协处理器就绪（协议 v1 · 2.4GHz）…` 并返回「未找到目标」错误，说明串口双向通信与固件扫描均正常。

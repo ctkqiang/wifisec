@@ -2,7 +2,7 @@ package tests
 
 import (
 	"testing"
-	platformesp "wifisec/internal/platform/esp8266"
+	platformesp "wifisec/internal/platform/esp"
 )
 
 // TestEncodeCommand 验证主机→固件帧布局：魔数、命令字、小端长度与 payload。
@@ -61,8 +61,9 @@ func TestEncodeCommand(t *testing.T) {
 }
 
 // TestDecodeReply 验证回复帧解析：噪声重同步、帧分片、不完整帧保留。
-// ESP8266 上电以 74880 波特输出启动日志，在 115200 下呈现为随机噪声，
-// 解析器必须跳过噪声找到帧头，否则后续数据全部被堵死。
+// ESP 芯片上电以非工作波特率输出启动日志（ESP8266 为 74880），
+// 在 115200 下呈现为随机噪声，解析器必须跳过噪声找到帧头，
+// 否则后续数据全部被堵死。
 func TestDecodeReply(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -136,6 +137,60 @@ func TestDecodeReply(t *testing.T) {
 			}
 			if len(rest) != tt.wantRestLen {
 				t.Errorf("rest 长度不符：got %d, want %d", len(rest), tt.wantRestLen)
+			}
+		})
+	}
+}
+
+// TestParsePong 验证握手应答解析：完整两字节载荷、旧固件单字节、空载荷。
+// 能力位图是协议 v1 的尾部扩展，旧固件不带该字节时必须按无扩展能力处理，
+// 否则旧固件会被误判为损坏而遭到拒绝。
+func TestParsePong(t *testing.T) {
+	tests := []struct {
+		name        string
+		payload     []byte
+		wantVersion byte
+		wantCaps    byte
+		wantErr     bool
+	}{
+		{
+			name:        "完整载荷含能力位图",
+			payload:     []byte{0x01, platformesp.CapBand5GHz},
+			wantVersion: 1,
+			wantCaps:    platformesp.CapBand5GHz,
+		},
+		{
+			name:        "旧固件只回版本号",
+			payload:     []byte{0x01},
+			wantVersion: 1,
+			wantCaps:    0x00,
+		},
+		{
+			name:    "空载荷",
+			payload: []byte{},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			version, caps, err := platformesp.ParsePong(tt.payload)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("期望报错但解析成功")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("解析失败：%v", err)
+			}
+			if version != tt.wantVersion {
+				t.Errorf("版本不符：got %d, want %d", version, tt.wantVersion)
+			}
+			if caps != tt.wantCaps {
+				t.Errorf("能力位图不符：got 0x%02X, want 0x%02X", caps, tt.wantCaps)
 			}
 		})
 	}

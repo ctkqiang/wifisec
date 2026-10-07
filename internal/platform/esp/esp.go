@@ -1,14 +1,17 @@
-// Package esp8266 通过 USB 串口驱动 ESP8266 协处理器完成 2.4GHz 帧注入。
+// Package esp 通过 USB 串口驱动 ESP 系列协处理器完成 802.11 帧注入。
 //
-// 宿主机只把 ESP8266 当作普通串口设备，射频完全由板载芯片执行，
+// 支持 ESP8266、ESP32 经典/C2/C3/S2/S3（2.4GHz）与 ESP32-C5（2.4+5GHz 双频）。
+// 宿主机只把开发板当作普通串口设备，射频完全由板载芯片执行，
 // 因此该适配器在 macOS / Linux / Windows / Termux 上行为一致，
 // 是 macOS 等不开放帧注入平台的唯一注入路径。
+// Arduino UNO + WiFi Shield（NINA/WINC 模组）不开放原始帧注入 API，
+// 固件侧以编译期 #error 显式拒绝，不在本包能力范围内。
 //
 // 与固件（core/esp/esp.ino）之间的协议为定长头小端帧：
 //
 //	主机→ESP: [0xA5][cmd][len_lo][len_hi][payload]
 //	ESP→主机: [0x5A][cmd][len_lo][len_hi][payload]
-package esp8266
+package esp
 
 import (
 	"errors"
@@ -27,18 +30,27 @@ const (
 	frameHeadESP  = 0x5A
 
 	// 命令字：主机侧有握手、扫描、注入三类请求。
-	cmdPing   = 0x00 // 握手；固件回 repPong 携带协议版本
+	cmdPing   = 0x00 // 握手；固件回 repPong 携带协议版本与能力位图
 	cmdScan   = 0x01 // 主机请求扫描；ESP 逐条回 scanEntry，最后回 scanDone
 	cmdInject = 0x02 // payload = 信道(1) + 802.11 帧（不含 radiotap）
 
 	// 回复字：握手应答 / 扫描条目 / 扫描结束 / 错误。
-	repPong      = 0x00 // payload = 协议版本(1)
+	repPong      = 0x00 // payload = 协议版本(1) + 能力位图(1，旧固件可缺省)
 	repScanEntry = 0x01 // payload = bssid(6) + channel(1) + rssi(1,有符号) + ssidLen(1) + ssid
 	repScanDone  = 0x02
 	repError     = 0x04 // payload = 出错命令(1) + 错误码(1)
 
-	// scanReadTimeout 是单帧回复的读取预算；覆盖 ESP8266 一次完整扫描
-	//（约 2-3 秒）加串口回传绰绰有余。
+	// protoVersion 是本程序支持的固件协议版本。不一致说明固件过旧或过新，
+	// 命令语义可能对不上，必须拒绝并要求重新烧录，而不是带病运行。
+	protoVersion = 1
+
+	// CapBand5GHz 是能力位图 bit0：固件声明具备 5GHz 注入能力。
+	// 乐鑫全系当前只有 ESP32-C5 是双频芯片，其余（含全部 ESP8266）
+	// 射频物理上只覆盖 2.4GHz。导出供 tests/ 验证位图解析。
+	CapBand5GHz byte = 0x01
+
+	// scanReadTimeout 是单帧回复的读取预算；覆盖一次完整扫描
+	//（2.4GHz 约 2-3 秒，双频芯片扫 5GHz 更久）加串口回传绰绰有余。
 	scanReadTimeout = 15 * time.Second
 
 	// 打开串口会触发板子复位重启，boot 期间主机发来的命令全部丢失，
@@ -53,7 +65,7 @@ const (
 // errFrameTimeout 表示在预算内没有收到完整的一帧回复。
 var errFrameTimeout = errors.New("读取回复帧超时")
 
-// Network 是 ESP8266 扫描到的一个 2.4GHz 接入点。
+// Network 是 ESP 协处理器扫描到的一个接入点。
 type Network struct {
 	SSID    string
 	BSSID   string
@@ -64,7 +76,9 @@ type Network struct {
 // Injector 封装串口句柄，实现 deauther 的 frameWriter / channelSetter 契约。
 type Injector struct {
 	port    serial.Port
-	channel int    // 当前注入信道；ESP8266 逐帧携带信道，这里仅缓存
+	channel int    // 当前注入信道；逐帧随注入命令下发，这里仅缓存
+	version byte   // 握手时固件上报的协议版本
+	caps    byte   // 握手时固件上报的能力位图（CapBand5GHz 等）
 	rx      []byte // 跨 Read 调用累积的未解析字节流
 }
 
@@ -113,12 +127,23 @@ func DefaultPort() (string, error) {
 
 	switch len(usbPorts) {
 	case 0:
-		return "", errors.New("未发现 USB 串口设备，请确认 ESP8266 已插入（驱动：CH340/CP2102）")
+		return "", errors.New("未发现 USB 串口设备，请确认开发板已插入（驱动：CH340/CP2102）")
 	case 1:
 		return usbPorts[0], nil
 	default:
 		return "", fmt.Errorf("发现多个 USB 串口设备 %s，请把端口名作为第二参数传入", strings.Join(usbPorts, "、"))
 	}
+}
+
+// Supports5GHz 报告固件是否声明了 5GHz 注入能力。
+// 频段策略以固件能力位图为准，而不是宿主机猜测板型。
+func (i *Injector) Supports5GHz() bool {
+	return i.caps&CapBand5GHz != 0
+}
+
+// FirmwareVersion 返回握手时固件上报的协议版本，用于日志与排错。
+func (i *Injector) FirmwareVersion() byte {
+	return i.version
 }
 
 // SetChannel 缓存注入信道；实际切信道随每帧注入命令下发，
@@ -129,7 +154,7 @@ func (i *Injector) SetChannel(channel int) error {
 }
 
 // Write 把一帧带 radiotap 头的 802.11 数据经串口交给固件注入。
-// ESP8266 的自由帧 API 只接受纯 802.11 帧，这里剥掉前 8 字节 radiotap 头。
+// 固件的自由帧 API 只接受纯 802.11 帧，这里剥掉前 8 字节 radiotap 头。
 func (i *Injector) Write(frame []byte) error {
 	const radiotapHeaderLen = 8 // 与 ieee80211.RadiotapHeaderLen 保持一致
 
@@ -145,7 +170,9 @@ func (i *Injector) Write(frame []byte) error {
 	return err
 }
 
-// Scan 请求固件扫描周边 2.4GHz 网络，流式读取条目直到收到结束帧。
+// Scan 请求固件扫描周边网络，流式读取条目直到收到结束帧。
+// 返回的频段范围取决于固件能力：2.4GHz 芯片只回 2.4GHz 结果，
+// ESP32-C5 会同时回 5GHz 结果。
 func (i *Injector) Scan() ([]Network, error) {
 	if _, err := i.port.Write(EncodeCommand(cmdScan, nil)); err != nil {
 		return nil, fmt.Errorf("发送扫描命令失败：%w", err)
@@ -213,10 +240,27 @@ func ParseScanEntry(payload []byte) (Network, error) {
 	return entry, nil
 }
 
+// ParsePong 解析握手应答载荷：协议版本(1) + 能力位图(1)。
+// 能力位图是协议 v1 的尾部扩展，旧固件只回版本号一个字节，
+// 此时按「无扩展能力」（仅 2.4GHz）处理，保持向后兼容。
+// 导出供 tests/ 做表驱动测试。
+func ParsePong(payload []byte) (version, caps byte, err error) {
+	if len(payload) < 1 {
+		return 0, 0, errors.New("PONG 载荷为空，固件未上报协议版本")
+	}
+
+	version = payload[0]
+	if len(payload) >= 2 {
+		caps = payload[1]
+	}
+
+	return version, caps, nil
+}
+
 // DecodeReply 从字节流中拆出一帧固件回复；流不足一帧时返回 ok=false。
-// 帧头之前的杂散字节会被丢弃后重新同步——ESP8266 上电时以 74880 波特
-// 输出启动日志，在 115200 下呈现为随机噪声，若不跳过会永远卡住解析。
-// 导出供 tests/ 验证重同步行为。
+// 帧头之前的杂散字节会被丢弃后重新同步——ESP 芯片上电时以非工作波特率
+// 输出启动日志（ESP8266 为 74880），在 115200 下呈现为随机噪声，
+// 若不跳过会永远卡住解析。导出供 tests/ 验证重同步行为。
 func DecodeReply(stream []byte) (cmd byte, payload, rest []byte, ok bool) {
 	for len(stream) > 0 && stream[0] != frameHeadESP {
 		stream = stream[1:]
@@ -234,7 +278,7 @@ func DecodeReply(stream []byte) (cmd byte, payload, rest []byte, ok bool) {
 	return stream[1], stream[4:frameLen], stream[frameLen:], true
 }
 
-// handshake 通过 PING/PONG 确认固件就绪。
+// handshake 通过 PING/PONG 确认固件就绪，并记录协议版本与能力位图。
 // 打开串口触发板子复位后，固件需 1-2 秒完成 boot（含 WiFi 初始化），
 // 期间发出的命令全部丢失，因此以固定节奏重试直到拿到 PONG。
 func (i *Injector) handshake() error {
@@ -246,10 +290,25 @@ func (i *Injector) handshake() error {
 			return fmt.Errorf("发送握手命令失败：%w", err)
 		}
 
-		cmd, _, err := i.readFrame(handshakeTimeout)
-		if err == nil && cmd == repPong {
-			return nil
+		cmd, payload, err := i.readFrame(handshakeTimeout)
+		if err != nil || cmd != repPong {
+			continue
 		}
+
+		version, caps, err := ParsePong(payload)
+		if err != nil {
+			continue
+		}
+
+		// 版本不一致说明固件不是当前配套版本，重试不会改变结果，
+		// 直接失败并指出修复路径。
+		if version != protoVersion {
+			return fmt.Errorf("固件协议版本 v%d 与本程序支持的 v%d 不兼容，请重新烧录 core/esp/esp.ino 最新固件", version, protoVersion)
+		}
+
+		i.version = version
+		i.caps = caps
+		return nil
 	}
 
 	return errors.New("固件握手失败：请确认已烧录 wifisec 固件（core/esp/esp.ino），且波特率为 115200")
