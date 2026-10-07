@@ -229,7 +229,36 @@ ESP→主机: [0x5A][cmd][len_lo][len_hi][payload]
    - Linux：`ls /dev/ttyUSB*`（用户需在 `dialout` 组）
    - Windows：设备管理器查看 `COMx`
 
-### 5.5 使用
+### 5.5 烧录排错
+
+**编译内存报表解读**：编译成功后 IDE 会输出分段占用，以下为正常范围（以本固件实测为例）：
+
+| 段 | 实测占用 | 判定 | 说明 |
+|:---|:---|:---|:---|
+| RAM | 35%（28700/80192） | 健康 | 大头是 core 的 WiFi 驱动缓冲区（BSS 26KB），固件自身仅 512B 接收缓冲 |
+| IRAM | 91%（59747/65536） | 正常 | 32KB 被 flash 指令缓存强制保留，其余为 core 中断代码的固定开销 |
+| Flash | 22%（239316/1048576） | 充裕 | 余量约 800KB |
+
+判定标准：编译器未对任何段报 `overflow` 错误即正常。IRAM 91% 是**每个** ESP8266 sketch 的基线水位，不是本固件的问题。
+
+**上传超时（`Failed to connect to ESP8266: Timed out waiting for packet header`）**：
+
+ESP8266 必须在复位瞬间 GPIO0 拉低才能进入 UART 下载模式。开发板的自动复位电路（DTR/RTS）在 macOS + CH340 组合下经常失灵，esptool 同步不到 bootloader 即超时。按成功率排序：
+
+1. **手动进下载模式**（首选）：按住 `FLASH`（或 `BOOT`）按钮不放 → 点按一下 `RST` → 松开 `FLASH` → 立即点上传。看到 `Writing at 0x00000000...` 即成功。
+2. **降低上传波特率**：`工具` → `Upload Speed` → `115200`。默认的 460800/921600 在部分 CH340 与线材组合下不稳定。
+3. **检查串口占用**：`lsof /dev/cu.usbserial-XXXX`，关闭占用进程（如 Arduino 串口监视器）。
+4. **切换复位方式**：`工具` → `Reset Method` → NodeMCU/Wemos 板选 `nodemcu`，通用板选 `ck`。
+
+**`找到无效库 ... no headers files (.h) found`**：
+
+与固件无关。`~/Documents/Arduino/libraries/` 下存在不符合库结构的文件夹（例如误放的板级核心仓库），IDE 每次编译都会警告。将其移出 `libraries/` 目录即可消除，例如：
+
+```bash
+mv ~/Documents/Arduino/libraries/<误放目录> ~/Documents/
+```
+
+### 5.6 使用
 
 ```bash
 # 自动探测唯一 USB 串口
@@ -386,7 +415,7 @@ EXIT
 |:---|:---|:---|
 | `未发现 USB 串口设备` | ESP 未插入或驱动未装 | 检查数据线（须为数据线非充电线）；CH340 芯片装驱动 |
 | `发现多个 USB 串口设备` | 插了多个串口设备 | 把端口名作为第二参数传入 |
-| `等待固件响应超时` | 固件未烧录或波特率不匹配 | 重新烧录 [core/esp.ino](../../core/esp.ino) |
+| `等待固件响应超时` | 固件未烧录或波特率不匹配 | 重新烧录 [core/esp/esp.ino](../../core/esp/esp.ino) |
 | `未找到目标 X；注意 ESP8266 仅支持 2.4GHz` | 目标只在 5/6GHz 发射 | 换 Linux/Windows 原生路径，或确认目标有 2.4GHz 信号 |
 | `打开原始套接字需要 root 权限或 CAP_NET_RAW` | Linux 未提权 | `sudo` 运行 |
 | `Operation not permitted`（iw 建 monitor） | 同上 | `sudo` 运行 |
