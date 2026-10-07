@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -80,16 +81,9 @@ func HandleBootstrap() bool {
 	return true
 }
 
-// hasBootstrapFlag 仅判断当前进程是否为 helper 实例，
-// 与参数提取拆开以避免一次遍历里同时处理两种语义。
+// hasBootstrapFlag 仅判断当前进程是否为 helper 实例。
 func hasBootstrapFlag() bool {
-	for _, arg := range os.Args[1:] {
-		if arg == BootstrapFlag {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(os.Args[1:], BootstrapFlag)
 }
 
 // writeHelperResult 以 0600 权限、临时文件 + rename 的方式原子落盘，
