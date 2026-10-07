@@ -6,6 +6,10 @@ import (
 )
 
 const (
+	EMBEDDED_MODE = true
+)
+
+const (
 	PID_FILE        = "/var/run/deauth.pid"
 	WIRELESS_FILE   = "/proc/net/wireless"
 	DEV_FILE        = "/proc/net/dev"
