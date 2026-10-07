@@ -268,7 +268,7 @@ wifisec serial
 wifisec deauth gunner
 
 # 多个串口设备时手动指定
-wifisec deauth b4:b0:24:b6:12:4b /dev/cu.usbserial-1410
+wifisec deauth <BSID> /dev/cu.usbserial-1410
 ```
 
 `wifisec serial` 输出示例（USB 设备置顶并给出 VID:PID，CH340 为 `1A86:7523`）：
@@ -313,7 +313,7 @@ ESP8266 会先以自身射频扫描周边 2.4GHz 网络（顺便绕过了 macOS 
 
 ```bash
 sudo wifisec deauth <SSID>            # 按 SSID（同名多 AP 全打，轮流切信道）
-sudo wifisec deauth b4:b0:24:b6:12:4b # 按 BSSID（精确锁定）
+sudo wifisec deauth <BSID> # 按 BSSID（精确锁定）
 sudo wifisec deauth <SSID> wlan1      # 指定接口（缺省取第一块无线网卡）
 ```
 
@@ -350,7 +350,7 @@ sudo wifisec deauth <SSID> wlan1      # 指定接口（缺省取第一块无线�
 
 ```powershell
 wifisec.exe deauth <SSID>
-wifisec.exe deauth b4:b0:24:b6:12:4b "WLAN"
+wifisec.exe deauth <BSID> "WLAN"
 ```
 
 > 该路径目前通过交叉编译验证（`GOOS=windows` 构建通过），真机注入行为依赖具体网卡驱动，实测反馈欢迎。
