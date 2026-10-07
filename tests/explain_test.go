@@ -9,8 +9,6 @@ import (
 	"wifisec/internal/functions"
 )
 
-// captureStdout 捕获 fn 执行期间写入标准输出的全部内容，用于行为级断言。
-// 输出仅几 KB，远低于管道缓冲区，fn 返回后统一读取不会阻塞。
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 
@@ -37,8 +35,6 @@ func captureStdout(t *testing.T, fn func()) string {
 	return buffer.String()
 }
 
-// TestExplainRegulatoryGrid 验证法规合规区块以网格呈现：
-// 单元格含国码、名称与判定，且一行容纳多格（网格化的意义所在）。
 func TestExplainRegulatoryGrid(t *testing.T) {
 	network := functions.WiFiNetwork{
 		ESSID: "grid-check", BSSID: "aa:bb:cc:dd:ee:ff",
@@ -56,8 +52,6 @@ func TestExplainRegulatoryGrid(t *testing.T) {
 		}
 	}
 
-	// 网格特征：至少一行装了两个以上单元格（即含两个判定标记）。
-	// 用「· 合法 / · 禁用 / · DFS」计数，避开安全态势行里的「· 套件 · 认证」。
 	gridLike := false
 	for _, line := range strings.Split(output, "\n") {
 		verdicts := strings.Count(line, "· 合法") + strings.Count(line, "· 禁用") + strings.Count(line, "· DFS")
@@ -72,8 +66,6 @@ func TestExplainRegulatoryGrid(t *testing.T) {
 	}
 }
 
-// TestExplainSecurityRouting 验证安全态势按认证方式分流：
-// 企业级（802.1X）输出 EAP 态势对照表，个人级输出 PSK/SAE 话术，互不串场。
 func TestExplainSecurityRouting(t *testing.T) {
 	tests := []struct {
 		name           string

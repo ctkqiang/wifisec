@@ -6,8 +6,6 @@ import (
 	platformdarwin "wifisec/internal/platform/darwin"
 )
 
-// TestMergeCoreWLANBSSID 验证 macOS 两路数据的 BSSID 合并规则：
-// 占位符被真实 MAC 补齐、已有真实 BSSID 不被覆盖、同名双频按信道区分。
 func TestMergeCoreWLANBSSID(t *testing.T) {
 	tests := []struct {
 		name      string

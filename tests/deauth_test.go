@@ -7,13 +7,12 @@ import (
 	platformlinux "wifisec/internal/platform/linux"
 )
 
-// TestSelectDeauthTargets 覆盖 SSID 精确匹配、BSSID 归一化匹配、同名多 AP 入选、无命中四类场景。
 func TestSelectDeauthTargets(t *testing.T) {
 	scanned := []platformlinux.Network{
 		{BSSID: "aa:bb:cc:dd:ee:01", SSID: "HomeWiFi", Channel: 6},
 		{BSSID: "aa:bb:cc:dd:ee:02", SSID: "HomeWiFi", Channel: 36},
 		{BSSID: "aa:bb:cc:dd:ee:03", SSID: "CoffeeShop", Channel: 1},
-		{BSSID: "aa:bb:cc:dd:ee:04", SSID: "homewifi", Channel: 11}, // 小写，不应匹配
+		{BSSID: "aa:bb:cc:dd:ee:04", SSID: "homewifi", Channel: 11},
 	}
 
 	tests := []struct {

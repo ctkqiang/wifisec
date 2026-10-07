@@ -17,6 +17,7 @@ type Network struct {
 type Interface struct {
 	Name        string // 适配器名称（连接名），如 Wi-Fi
 	Description string // 适配器型号描述
+	GUID        string // 适配器 GUID，用于构造 Npcap 设备路径
 	MAC         string // 物理地址
 	State       string // 归一化后的 UP / DOWN
 	Index       int    // 内核接口索引（来自 Go net 包，netsh 不提供）

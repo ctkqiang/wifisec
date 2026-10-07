@@ -7,8 +7,6 @@ import (
 	platformwindows "wifisec/internal/platform/windows"
 )
 
-// TestParseTermuxCapabilities 锁定 wpa_supplicant 能力串到安全三列的归一化，
-// 覆盖 WPA3/GCMP、WPA2/CCMP、企业 EAP、WEP 与开放网络。
 func TestParseTermuxCapabilities(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -36,7 +34,6 @@ func TestParseTermuxCapabilities(t *testing.T) {
 	}
 }
 
-// TestParseConnectedLink 验证 iw link 已连接/未连接两种输出。
 func TestParseConnectedLink(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -69,7 +66,6 @@ func TestParseConnectedLink(t *testing.T) {
 	}
 }
 
-// TestParseInterfaceMode 验证 iw dev info 的工作模式提取。
 func TestParseInterfaceMode(t *testing.T) {
 	output := "Interface wlan0\n\tifindex 4\n\ttype managed\n\tchannel 11 (2462 MHz)"
 	if got := platformlinux.ParseInterfaceMode(output); got != "managed" {
@@ -77,7 +73,6 @@ func TestParseInterfaceMode(t *testing.T) {
 	}
 }
 
-// TestParseNetshInterfaces 验证 netsh 接口输出按空行分块、中文键名与状态归一化。
 func TestParseNetshInterfaces(t *testing.T) {
 	raw := "名称    : Wi-Fi\r\n" +
 		"描述    : Intel(R) Wi-Fi 6E AX211\r\n" +
@@ -95,7 +90,6 @@ func TestParseNetshInterfaces(t *testing.T) {
 	}
 }
 
-// TestParseNetshDriver 验证驱动名提取。
 func TestParseNetshDriver(t *testing.T) {
 	output := "接口名称: Wi-Fi\n    驱动程序                  : Intel(R) Wi-Fi 6E AX211\n    供应商: Intel"
 	if got := platformwindows.ParseDriver(output); got != "Intel(R) Wi-Fi 6E AX211" {

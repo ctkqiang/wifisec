@@ -6,8 +6,6 @@ import (
 	"wifisec/internal/functions"
 )
 
-// TestParseIWScanOutput 用真实结构的 iw scan 文本覆盖：
-// WPA2-PSK/CCMP 2.4GHz HT40、开放 5GHz VHT80+HE、隐藏 SSID 三类场景。
 func TestParseIWScanOutput(t *testing.T) {
 	const sample = "BSS 24:7f:20:11:22:33(on wlan0)\n" +
 		"\tTSF: 123456 us (0d)\n" +
@@ -85,7 +83,6 @@ func TestParseIWScanOutput(t *testing.T) {
 	}
 }
 
-// TestParseIWScanWPA3AndWEP 验证 WPA3-SAE/GCMP 与 WEP 的判定分支。
 func TestParseIWScanWPA3AndWEP(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -159,8 +156,6 @@ func TestParseIWScanWPA3AndWEP(t *testing.T) {
 	}
 }
 
-// TestParseNetshBSSIDOutput 覆盖英文与中文系统语言：
-// 同一 SSID 的多 BSSID 必须拆成多行，信号百分比换算 dBm，键名双语兼容。
 func TestParseNetshBSSIDOutput(t *testing.T) {
 	tests := []struct {
 		name      string

@@ -104,6 +104,7 @@ func ParseConnectedBSSID(output string) string {
 type interfaceEntry struct {
 	Name        string
 	Description string
+	GUID        string
 	MAC         string
 	State       string
 }
@@ -118,6 +119,7 @@ func ParseInterfaces(raw string) []Interface {
 			entries = append(entries, Interface{
 				Name:        current.Name,
 				Description: current.Description,
+				GUID:        current.GUID,
 				MAC:         current.MAC,
 				State:       normalizeState(current.State),
 			})
@@ -141,6 +143,8 @@ func ParseInterfaces(raw string) []Interface {
 			current.Name = strings.TrimSpace(value)
 		case "Description", "描述":
 			current.Description = strings.TrimSpace(value)
+		case "GUID":
+			current.GUID = strings.TrimSpace(value)
 		case "Physical address", "物理地址":
 			current.MAC = normalizeMAC(value)
 		case "State", "状态":

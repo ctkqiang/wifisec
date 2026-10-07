@@ -7,7 +7,6 @@ import (
 	"wifisec/internal/radio"
 )
 
-// 迷你法规数据集：覆盖 2.4GHz 直开、5GHz non-DFS、DFS 与禁用四种情形。
 const fixtureJSON = `{
   "XX": {
     "country": "XX",
@@ -28,7 +27,6 @@ const fixtureJSON = `{
   }
 }`
 
-// writeFixture 把测试数据落到临时目录，避免测试依赖真实 data/regulatory.json。
 func writeFixture(t *testing.T) string {
 	t.Helper()
 

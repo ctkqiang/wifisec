@@ -1,4 +1,4 @@
-//go:build linux && !android
+//go:build android
 
 package linux
 
@@ -14,13 +14,15 @@ func htons(v uint16) uint16 {
 	return (v << 8) | (v >> 8)
 }
 
-// FrameInjector 封装 AF_PACKET 原始套接字，用于向 monitor 接口注入帧。
+// FrameInjector 封装 Android 内核的 AF_PACKET 原始套接字。
+// Android 与 Linux 共享同一套内核 ABI，因此实现与 inject_linux.go 完全一致；
+// 独立文件是因为 Go 的 _linux.go 文件名后缀不会覆盖 android 构建标签。
 type FrameInjector struct {
 	fd int
 }
 
 // OpenInjector 在指定接口上打开 AF_PACKET/SOCK_RAW 套接字。
-// 进程必须具有 root 权限或 CAP_NET_RAW 能力，否则打开套接字会被拒绝。
+// 进程必须具有 root 权限（tsu/su），否则打开套接字会被拒绝。
 func OpenInjector(ifaceName string) (*FrameInjector, error) {
 	iface, err := net.InterfaceByName(ifaceName)
 	if err != nil {
@@ -30,7 +32,7 @@ func OpenInjector(ifaceName string) (*FrameInjector, error) {
 	fd, err := syscall.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, int(htons(syscall.ETH_P_ALL)))
 	if err != nil {
 		if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
-			return nil, errors.New("打开原始套接字需要 root 权限或 CAP_NET_RAW")
+			return nil, errors.New("打开原始套接字需要 root 权限（请使用 tsu 或 su 运行）")
 		}
 		return nil, fmt.Errorf("创建 AF_PACKET 套接字失败：%w", err)
 	}

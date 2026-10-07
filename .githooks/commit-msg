@@ -55,7 +55,9 @@ if ! printf '%s\n' "$subject" | grep -qE "^(${TYPES})(\([^()[:space:]]+\))?!?: .
 fi
 
 desc="$(printf '%s\n' "$subject" | sed -E "s/^(${TYPES})(\([^()[:space:]]+\))?!?: //")"
-if ! printf '%s\n' "$desc" | grep -qE "${CJK_CLASS}"; then
+# macOS 自带 BSD grep 2.6 不支持多字节区间 [一-鿿]（报 invalid character range），
+# 改用 perl 的 Unicode 脚本属性 \p{Han} 判定汉字，macOS/Linux 行为一致。
+if ! printf '%s\n' "$desc" | perl -CSD -lne '$ok = 1 if /\p{Han}/; END { exit($ok ? 0 : 1) }'; then
   fail "提交描述必须使用中文（当前描述无汉字）：${desc}"
 fi
 
