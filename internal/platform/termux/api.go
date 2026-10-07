@@ -15,7 +15,8 @@ const (
 
 // ErrTermuxAPIMissing 表示未安装 termux-api CLI / Termux:API 应用。
 var ErrTermuxAPIMissing = errors.New(
-	"Android 无 root 无法直接扫描：请安装 Termux:API 应用，并在 Termux 内执行 pkg install termux-api")
+	"Android 无 root 无法直接扫描：请安装 Termux:API 应用，并在 Termux 内执行 pkg install termux-api",
+)
 
 // ErrScanUnavailable 表示 Termux:API 已安装但拿不到任何 Wi-Fi 数据。
 // Android 9+ 普遍对周边扫描限流或直接封禁，属于系统策略限制。
@@ -78,12 +79,13 @@ func Scan() ([]Network, error) {
 // queryConnectionInfo 读取当前连接信息；任何异常都返回 nil，
 // 因为未连接 Wi-Fi 本身不是错误，周边扫描仍可独立成功。
 func queryConnectionInfo() *connectionInfo {
+	var info connectionInfo
+
 	output, err := run(connectionInfoTimeout, "termux-wifi-connection-info")
 	if err != nil {
 		return nil
 	}
 
-	var info connectionInfo
 	if json.Unmarshal([]byte(output), &info) != nil || info.Error != "" || info.State != "COMPLETED" {
 		return nil
 	}
