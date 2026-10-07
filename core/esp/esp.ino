@@ -1,3 +1,5 @@
+#include <dummy.h>
+
 // wifisec ESP8266 串口注入固件（sketch 文件夹须命名为 wifisec，文件名须为 wifisec.ino，Arduino IDE 才能正确识别单一编译单元）
 //
 // 硬件：任意 ESP8266 开发板（NodeMCU / Wemos D1 mini 等），USB 连接宿主机。

@@ -1,6 +1,6 @@
 # WifiSec
 
-无线安全研究工具集，由 Python 项目 [wifi-deauth-attack](https://github.com/veerendra2/wifi-deauth-attack) 重构为 Go。
+
 
 ## 构建与运行
 
@@ -15,3 +15,4 @@ make test    # 运行测试
 | 命令 | 功能 | 文档 |
 | ---- | ---- | ---- |
 | `list` | 无线接口枚举与周边网络扫描 | [wifi_list.md](docs/feature/wifi_list.md) |
+| `deauth` | 802.11 deauthentication 帧注入 | [wifi_deauth.md](docs/feature/wifi_deauth.md) |
