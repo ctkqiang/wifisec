@@ -241,7 +241,7 @@ func (i *Injector) handshake() error {
 	// 清掉驱动层可能缓存的旧字节（上次会话残留、boot 噪声）。
 	_ = i.port.ResetInputBuffer()
 
-	for attempt := 0; attempt < handshakeAttempts; attempt++ {
+	for range handshakeAttempts {
 		if _, err := i.port.Write(EncodeCommand(cmdPing, nil)); err != nil {
 			return fmt.Errorf("发送握手命令失败：%w", err)
 		}

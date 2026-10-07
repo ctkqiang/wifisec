@@ -81,6 +81,8 @@ func deauthESP(arguments []string) error {
 		}
 	}
 
+	utilities.Info("连接 %s，等待固件就绪（打开串口会复位板子，boot 约需 1-2 秒）…", portName)
+
 	injector, err := platformesp.Open(portName)
 	if err != nil {
 		return err

@@ -60,6 +60,87 @@ func TestEncodeCommand(t *testing.T) {
 	}
 }
 
+// TestDecodeReply 验证回复帧解析：噪声重同步、帧分片、不完整帧保留。
+// ESP8266 上电以 74880 波特输出启动日志，在 115200 下呈现为随机噪声，
+// 解析器必须跳过噪声找到帧头，否则后续数据全部被堵死。
+func TestDecodeReply(t *testing.T) {
+	tests := []struct {
+		name        string
+		stream      []byte
+		wantOK      bool
+		wantCmd     byte
+		wantPayload []byte
+		wantRestLen int
+	}{
+		{
+			name:        "完整 PONG 帧",
+			stream:      []byte{0x5A, 0x00, 0x01, 0x00, 0x01},
+			wantOK:      true,
+			wantCmd:     0x00,
+			wantPayload: []byte{0x01},
+			wantRestLen: 0,
+		},
+		{
+			name:        "帧头前带 boot 噪声",
+			stream:      []byte{0x7F, 0x8C, 0xFF, 0x5A, 0x00, 0x01, 0x00, 0x01},
+			wantOK:      true,
+			wantCmd:     0x00,
+			wantPayload: []byte{0x01},
+			wantRestLen: 0,
+		},
+		{
+			name:        "帧跨两次读取",
+			stream:      []byte{0x5A, 0x01, 0x03, 0x00, 0xAA},
+			wantOK:      false,
+			wantRestLen: 5, // 残缺帧必须原样保留等下一段
+		},
+		{
+			name:        "纯噪声没有帧头",
+			stream:      []byte{0x11, 0x22, 0x33},
+			wantOK:      false,
+			wantRestLen: 0,
+		},
+		{
+			name:        "帧尾紧随第二帧",
+			stream:      []byte{0x5A, 0x02, 0x00, 0x00, 0x5A, 0x00, 0x01, 0x00, 0x01},
+			wantOK:      true,
+			wantCmd:     0x02,
+			wantPayload: []byte{},
+			wantRestLen: 5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd, payload, rest, ok := platformesp.DecodeReply(tt.stream)
+
+			if ok != tt.wantOK {
+				t.Fatalf("ok 不符：got %v, want %v", ok, tt.wantOK)
+			}
+			if !ok {
+				if len(rest) != tt.wantRestLen {
+					t.Fatalf("残留长度不符：got %d, want %d", len(rest), tt.wantRestLen)
+				}
+				return
+			}
+			if cmd != tt.wantCmd {
+				t.Errorf("cmd 不符：got 0x%02X, want 0x%02X", cmd, tt.wantCmd)
+			}
+			if len(payload) != len(tt.wantPayload) {
+				t.Fatalf("payload 长度不符：got %d, want %d", len(payload), len(tt.wantPayload))
+			}
+			for i := range tt.wantPayload {
+				if payload[i] != tt.wantPayload[i] {
+					t.Fatalf("payload[%d] 不符：got 0x%02X, want 0x%02X", i, payload[i], tt.wantPayload[i])
+				}
+			}
+			if len(rest) != tt.wantRestLen {
+				t.Errorf("rest 长度不符：got %d, want %d", len(rest), tt.wantRestLen)
+			}
+		})
+	}
+}
+
 // TestParseScanEntry 覆盖合法条目、截断载荷、SSID 越界、隐藏网络（空 SSID）。
 func TestParseScanEntry(t *testing.T) {
 	tests := []struct {

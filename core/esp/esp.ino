@@ -25,11 +25,14 @@ extern "C" {
 
 static const uint8_t  FRAME_HEAD_HOST = 0xA5;
 static const uint8_t  FRAME_HEAD_ESP  = 0x5A;
+static const uint8_t  CMD_PING        = 0x00;  // 握手请求，回复 REP_PONG
 static const uint8_t  CMD_SCAN        = 0x01;
 static const uint8_t  CMD_INJECT      = 0x02;
+static const uint8_t  REP_PONG        = 0x00;  // payload = 协议版本(1)
 static const uint8_t  REP_SCAN_ENTRY  = 0x01;
 static const uint8_t  REP_SCAN_DONE   = 0x02;
 static const uint8_t  REP_ERROR       = 0x04;
+static const uint8_t  PROTO_VERSION   = 1;
 
 // 板载 LED 状态指示：让用户不看串口也能判断固件在干什么。
 // ESP8266/ESP32 多数开发板的板载 LED 为低电平点亮（active LOW），
@@ -56,6 +59,16 @@ void setup() {
   // 扫描需要 station 模式；不关联任何 AP，保持游离态。
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
+
+  // 上电快闪三下：肉眼可辨固件已完成启动。
+  for (int k = 0; k < 3; k++) {
+    digitalWrite(LED_PIN, LOW);  delay(80);
+    digitalWrite(LED_PIN, HIGH); delay(80);
+  }
+
+  // 上电就绪信号：宿主机打开串口会触发板子复位，boot 完成前主机发来的
+  // 命令全部丢失；开机主动上报 PONG，让主机据此判断固件已就位。
+  sendReply(REP_PONG, &PROTO_VERSION, 1);
 }
 
 // 发送一帧回复到主机
@@ -162,7 +175,8 @@ void loop() {
     }
 
     if (rxState == 5) {
-      if (rxCmd == CMD_SCAN) handleScan();
+      if (rxCmd == CMD_PING) sendReply(REP_PONG, &PROTO_VERSION, 1);
+      else if (rxCmd == CMD_SCAN) handleScan();
       else if (rxCmd == CMD_INJECT) handleInject(rxBuf, rxLen);
       else sendError(rxCmd, 0xFF);
       rxState = 0;
