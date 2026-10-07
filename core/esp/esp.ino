@@ -31,6 +31,13 @@ static const uint8_t  REP_SCAN_ENTRY  = 0x01;
 static const uint8_t  REP_SCAN_DONE   = 0x02;
 static const uint8_t  REP_ERROR       = 0x04;
 
+// 板载 LED 状态指示：让用户不看串口也能判断固件在干什么。
+// ESP8266/ESP32 多数开发板的板载 LED 为低电平点亮（active LOW），
+// LED_BUILTIN 由 core 按板型映射（NodeMCU/Wemos D1 mini 为 GPIO2）。
+static const uint8_t  LED_PIN      = LED_BUILTIN;
+static const uint32_t HEARTBEAT_MS = 500;  // 空闲心跳翻转间隔
+static unsigned long  lastHeartbeat = 0;
+
 // 串口状态机：等帧头 → 读命令与长度 → 收 payload → 执行
 static uint8_t  rxState = 0;
 static uint8_t  rxCmd = 0;
@@ -41,6 +48,10 @@ static uint8_t  rxBuf[512];  // deauth 帧最长 26 字节（去 radiotap），5
 void setup() {
   Serial.begin(115200);
   while (!Serial) {}
+
+  // LED 初始置灭（低电平点亮，故拉高为灭）。
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, HIGH);
 
   // 扫描需要 station 模式；不关联任何 AP，保持游离态。
   WiFi.mode(WIFI_STA);
@@ -63,9 +74,14 @@ static void sendError(uint8_t cmd, uint8_t errCode) {
 
 // 执行扫描并流式回传；hidden=true 连隐藏 SSID 的 AP 一并列出。
 static void handleScan() {
+  // 扫描期间 LED 常亮：scanNetworks 是阻塞调用（约 2-3 秒），
+  // 常亮正好覆盖整个过程，结束后恢复心跳。
+  digitalWrite(LED_PIN, LOW);
+
   int n = WiFi.scanNetworks(false, true);
   if (n < 0) {
     sendError(CMD_SCAN, 1);
+    digitalWrite(LED_PIN, HIGH);
     return;
   }
 
@@ -87,6 +103,7 @@ static void handleScan() {
 
   WiFi.scanDelete();
   sendReply(REP_SCAN_DONE, NULL, 0);
+  digitalWrite(LED_PIN, HIGH);  // 扫描结束，恢复心跳
 }
 
 // 执行注入：payload[0] 为信道，其后为完整 802.11 帧。
@@ -106,6 +123,9 @@ static void handleInject(const uint8_t* payload, uint16_t len) {
   wifi_set_channel(channel);
   // sys_seq=false：序列号由帧内值决定（主机侧置 0，芯片按自身计数器填充）。
   wifi_send_pkt_freedom((uint8_t*)(payload + 1), len - 1, false);
+
+  // 每注入一帧翻转一次 LED：持续注入时呈现急促闪烁，与空闲心跳明显区分。
+  digitalWrite(LED_PIN, !digitalRead(LED_PIN));
 }
 
 void loop() {
@@ -147,5 +167,12 @@ void loop() {
       else sendError(rxCmd, 0xFF);
       rxState = 0;
     }
+  }
+
+  // 空闲心跳：每 500ms 翻转一次 LED，表示固件存活、串口待命。
+  // 用 millis() 非阻塞实现，不会拖慢串口状态机。
+  if (millis() - lastHeartbeat >= HEARTBEAT_MS) {
+    lastHeartbeat = millis();
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
   }
 }

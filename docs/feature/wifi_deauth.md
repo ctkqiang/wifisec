@@ -261,6 +261,9 @@ mv ~/Documents/Arduino/libraries/<误放目录> ~/Documents/
 ### 5.6 使用
 
 ```bash
+# 列出全部串口设备（确认板子被识别、取端口名）
+wifisec serial
+
 # 自动探测唯一 USB 串口
 wifisec deauth gunner
 
@@ -268,7 +271,29 @@ wifisec deauth gunner
 wifisec deauth b4:b0:24:b6:12:4b /dev/cu.usbserial-1410
 ```
 
+`wifisec serial` 输出示例（USB 设备置顶并给出 VID:PID，CH340 为 `1A86:7523`）：
+
+```
+端口                             类型  VID:PID    产品           序列号
+───────────────────────────────────────────────────────────────────────
+/dev/cu.usbserial-1120           USB   1A86:7523  USB2.0-Serial  -
+/dev/cu.Bluetooth-Incoming-Port  系统  -          -              -
+```
+
 ESP8266 会先以自身射频扫描周边 2.4GHz 网络（顺便绕过了 macOS 对未连接网络 BSSID 的脱敏），锁定目标后进入注入循环。
+
+### 5.7 LED 状态指示
+
+固件驱动板载 LED（`LED_BUILTIN`，NodeMCU/Wemos 为 GPIO2，低电平点亮），不看终端也能判断固件状态：
+
+| LED 表现 | 状态 |
+|:---|:---|
+| 每 0.5 秒规律闪烁（心跳） | 固件存活，串口待命 |
+| 常亮（约 2-3 秒） | 正在扫描周边网络 |
+| 急促无规律闪烁 | 正在注入 deauth 帧 |
+| 常灭 | 未上电、固件未烧录或串口命令从未到达 |
+
+心跳用 `millis()` 非阻塞实现，不拖慢串口状态机；注入闪烁由每帧翻转产生，帧率越高闪得越快。
 
 ---
 
@@ -287,9 +312,9 @@ ESP8266 会先以自身射频扫描周边 2.4GHz 网络（顺便绕过了 macOS 
 ### 6.2 执行要求
 
 ```bash
-sudo wifisec deauth gunner            # 按 SSID（同名多 AP 全打，轮流切信道）
+sudo wifisec deauth <SSID>            # 按 SSID（同名多 AP 全打，轮流切信道）
 sudo wifisec deauth b4:b0:24:b6:12:4b # 按 BSSID（精确锁定）
-sudo wifisec deauth gunner wlan1      # 指定接口（缺省取第一块无线网卡）
+sudo wifisec deauth <SSID> wlan1      # 指定接口（缺省取第一块无线网卡）
 ```
 
 - 需要 root 或 `CAP_NET_RAW`。
@@ -324,7 +349,7 @@ sudo wifisec deauth gunner wlan1      # 指定接口（缺省取第一块无线�
 3. 以管理员身份运行终端。
 
 ```powershell
-wifisec.exe deauth gunner
+wifisec.exe deauth <SSID>
 wifisec.exe deauth b4:b0:24:b6:12:4b "WLAN"
 ```
 
@@ -348,7 +373,7 @@ wifisec deauth <ssid|bssid> [iface|串口]
 ### 8.2 运行示例
 
 ```
-$ wifisec deauth gunner
+$ wifisec deauth <SSID>
 [INFO] 通过 /dev/cu.usbserial-1410 扫描周边 2.4GHz 网络…
 [INFO] 开始 deauth 攻击：接口 /dev/cu.usbserial-1410 · 目标 2 个 · 间隔 200ms
 [WARN] 仅用于授权测试，请确保目标网络为你所有或已获书面许可
