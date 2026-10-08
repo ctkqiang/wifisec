@@ -21,6 +21,11 @@ import (
 const (
 	// sendInterval 是每轮向所有目标发送 deauth 帧后的固定间隔。
 	sendInterval = 200 * time.Millisecond
+
+	// progressInterval 是注入期间主机侧进度心跳的间隔。
+	// 注入不回 ACK（逐条确认会占满 115200 baud 的串口带宽），固件只以
+	// LED 闪烁示意；主机按本地计数定时播报，长时间运行才不会像卡死。
+	progressInterval = 3 * time.Second
 )
 
 // frameWriter 是应用层对帧注入能力的抽象端口。
@@ -110,6 +115,10 @@ func deauthESP(arguments []string) error {
 		return fmt.Errorf("未找到目标 %s；当前协处理器仅支持 2.4GHz，5/6GHz 网络不可见", target)
 	}
 
+	// 固件注入不回确认（确认帧会占满串口带宽），主机侧的扫描汇总与
+	// 目标明细是用户核对「打的是谁、在哪条信道」的唯一依据。
+	utilities.Info("扫描完成：周边 %d 个网络，命中目标 %d 个", len(scanned), len(targets))
+
 	deauthTargets := make([]deauthTarget, 0, len(targets))
 	for _, ap := range targets {
 		// 同名 SSID 可能同时存在 2.4GHz 与 5GHz 的 AP；
@@ -130,6 +139,10 @@ func deauthESP(arguments []string) error {
 			utilities.Warn("构造 deauth 帧失败（BSSID %s）：%v", ap.BSSID, err)
 			continue
 		}
+
+		// %.32s：SSID 在协议层上限就是 32 字节，超长截断防止刷屏。
+		utilities.Info("目标：%.32s（%s）· 信道 %d · %d dBm · deauth 帧 %d 字节",
+			ap.SSID, ap.BSSID, ap.Channel, ap.RSSI, len(frame))
 
 		deauthTargets = append(deauthTargets, deauthTarget{
 			channel: ap.Channel,
@@ -523,11 +536,18 @@ func prepareMonitor(iface *WirelessInterface) (string, bool, error) {
 // runDeauthLoop 是跨平台共享的注入循环：按目标轮发、固定间隔、Ctrl-C 停止。
 // setChannel 与 injector 由平台适配层注入，循环本身不感知 AF_PACKET 或 Npcap。
 func runDeauthLoop(ctx context.Context, injector frameWriter, setChannel channelSetter, targets []deauthTarget, ifaceName string) {
-	utilities.Info("开始 deauth 攻击：接口 %s · 目标 %d 个 · 间隔 %s", ifaceName, len(targets), sendInterval)
+	utilities.Info("开始 deauth 攻击：接口 %s · 目标 %d 个 · 间隔 %s（每 %s 报一次进度，Ctrl-C 停止）",
+		ifaceName, len(targets), sendInterval, progressInterval)
 	utilities.Warn("仅用于授权测试，请确保目标网络为你所有或已获书面许可")
 
 	started := time.Now()
 	sent := 0
+
+	// 注入没有逐帧确认（确认会吃掉串口带宽），板载 LED 急闪是固件侧
+	// 唯一活性信号；主机按本地计数定时播报进度，长时间运行才不会
+	// 表现成假死，Ctrl-C 时的统计也与心跳数字连续可对账。
+	progress := time.NewTicker(progressInterval)
+	defer progress.Stop()
 
 	for {
 		for _, t := range targets {
@@ -550,8 +570,12 @@ func runDeauthLoop(ctx context.Context, injector frameWriter, setChannel channel
 
 		select {
 		case <-ctx.Done():
-			fmt.Printf("\r已发送 %d 帧 · 目标 %d 个 · 运行 %s\n", sent, len(targets), time.Since(started).Round(time.Second))
+			utilities.Info("已发送 %d 帧 · 目标 %d 个 · 运行 %s",
+				sent, len(targets), time.Since(started).Round(time.Second))
 			return
+		case <-progress.C:
+			utilities.Info("进行中：已发送 %d 帧 · 运行 %s",
+				sent, time.Since(started).Round(time.Second))
 		case <-time.After(sendInterval):
 		}
 	}
