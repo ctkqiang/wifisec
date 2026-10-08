@@ -198,7 +198,7 @@ jobs:
           cp artifacts/wifisec-windows/wifisec.exe release/wifisec-windows-amd64.exe
 
           cd artifacts/wifisec-macos
-          ditto -c -k --keepParent wifisec.app ../../release/wifisec-macos-app.zip
+          zip -r ../../release/wifisec-macos-app.zip wifisec.app
           cd ../..
 
           ls -la release/
