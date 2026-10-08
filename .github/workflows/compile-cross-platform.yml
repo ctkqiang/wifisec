@@ -204,33 +204,6 @@ jobs:
 
           ls -la release/
 
-      # 中文 PDF 用系统 Noto CJK 字体渲染；stylesheet 管正文，cjk 管字体回退
-      - name: 安装 pandoc 与中日韩字体
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq pandoc fonts-noto-cjk
-
-      - name: 生成 PDF 文档
-        run: |
-          pandoc \
-            docs/feature/wifi_list.md \
-            docs/feature/wifi_serial.md \
-            docs/feature/wifi_deauth.md \
-            -o release/wifisec-docs.pdf \
-            --pdf-engine=xelatex \
-            -V mainfont="Noto Sans CJK SC" \
-            -V monofont="Noto Sans Mono CJK SC" \
-            -V geometry:margin=2.2cm \
-            -V CJKmainfont="Noto Sans CJK SC" \
-            --toc \
-            --toc-depth=3 \
-            -V linkcolor=cyan \
-            --metadata title="WifiSec 使用文档" \
-            --metadata author="钟智强 · 哪吒网络安全" \
-            --metadata date="$(date +%Y-%m-%d)"
-
-          ls -la release/wifisec-docs.pdf
-
       - name: 创建 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -244,8 +217,6 @@ jobs:
             | macOS | `wifisec-macos-app.zip` | 解压后得 `wifisec.app`，定位授权依赖 bundle |
             | Linux | `wifisec-linux-amd64` | 单文件二进制，`chmod +x` 后运行 |
             | Windows | `wifisec-windows-amd64.exe` | 单文件可执行 |
-
-            另有 `wifisec-docs.pdf`：全部命令、串口协议、烧录排错合并的中文 PDF 手册。
 
             > 仅限自有或已获书面授权的网络使用。
           prerelease: false

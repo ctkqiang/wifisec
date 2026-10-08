@@ -188,14 +188,13 @@ wifisec/
 
 ## 下载
 
-打 tag（`v*`）会触发 CI 自动发布到 [GitHub Releases](https://github.com/ctkqiang/wifisec/releases)，含三平台产物与合并后的中文 PDF 手册：
+打 tag（`v*`）会触发 CI 自动发布到 [GitHub Releases](https://github.com/ctkqiang/wifisec/releases)，含三平台产物：
 
 | 平台 | 文件 | 说明 |
 | ---- | ---- | ---- |
 | macOS | `wifisec-macos-app.zip` | 解压后得 `wifisec.app`，定位授权依赖 bundle |
 | Linux | `wifisec-linux-amd64` | 单文件二进制，`chmod +x` 后运行 |
 | Windows | `wifisec-windows-amd64.exe` | 单文件可执行 |
-| 文档 | `wifisec-docs.pdf` | 全部命令、串口协议、烧录排错合并手册 |
 
 ```bash
 gh release download --repo ctkqiang/wifisec --pattern 'wifisec-linux-amd64'   # 按文件名下载
