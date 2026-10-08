@@ -197,9 +197,10 @@ jobs:
           cp artifacts/wifisec-ubuntu/wifisec release/wifisec-linux-amd64
           cp artifacts/wifisec-windows/wifisec.exe release/wifisec-windows-amd64.exe
 
-          cd artifacts/wifisec-macos
-          zip -r ../../release/wifisec-macos-app.zip wifisec.app
-          cd ../..
+          # upload-artifact 上传的是 wifisec.app/**（目录内容），下载后需重建目录结构
+          mkdir -p wifisec.app
+          cp -r artifacts/wifisec-macos/ wifisec.app/
+          zip -r release/wifisec-macos-app.zip wifisec.app
 
           ls -la release/
 
