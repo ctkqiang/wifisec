@@ -39,7 +39,7 @@
 
 ## 项目概述
 
-WifiSec 是将 [veerendra2/wifi-deauth-attack](https://github.com/veerendra2/wifi-deauth-attack)（Python）重构为 Go 的无线安全测试工具，采用 Hexagonal Architecture：应用编排不感知底层注入方式，平台能力收敛在 adapter 层。
+WifiSec 是 Go 编写的无线安全测试工具，采用 Hexagonal Architecture：应用编排不感知底层注入方式，平台能力收敛在 adapter 层。
 
 **核心特性：**
 
