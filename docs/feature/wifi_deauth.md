@@ -234,7 +234,8 @@ ESP→主机: [0x5A][cmd][len_lo][len_hi][payload]
 
 设计取舍：
 
-- **先握手再干活**——打开串口触发板子复位，boot 需 1-2 秒；主机以 500ms 节奏重发 PING，收到 PONG（协议版本 1）才发扫描命令，冷启动/热启动时序通吃。
+- **打开串口先拉复位时序**——多数串口驱动打开端口时默认置位 DTR/RTS，NodeMCU 自动复位电路上 DTR 即 GPIO0，默认电平会让芯片在复位瞬间锁进 ROM 下载模式（115200 下完全静默）。主机打开后显式输出「GPIO0 拉高 → EN 拉低 100ms → 释放」，强制从 Flash 正常启动。
+- **先握手再干活**——boot 需 1-2 秒；主机以 500ms 节奏重发 PING，收到 PONG（协议版本 1）才发扫描命令，冷启动/热启动时序通吃。
 - **噪声重同步**——ESP 芯片上电以非工作波特率输出启动日志（ESP8266 为 74880），在 115200 下呈现为随机字节；解析器逐字节丢弃直至帧头 `0x5A`，残缺帧保留待下一段拼齐。
 - **注入不回 ACK**——每条确认都占串口带宽（115200 baud ≈ 11KB/s），持续注入场景下丢确认比丢帧更伤帧率。
 - **信道随帧携带**——`SetChannel` 在 Go 侧仅缓存，多目标轮发时无需额外串口往返。
@@ -246,7 +247,8 @@ ESP→主机: [0x5A][cmd][len_lo][len_hi][payload]
 
 1. 安装 Arduino IDE 或 arduino-cli，添加对应开发板支持：ESP8266 用 `esp8266:esp8266`，ESP32 系列用 `esp32:esp32`。
 2. 用 Arduino IDE 直接打开 `core/esp/esp.ino`。
-3. 开发板选择对应型号（ESP8266 如 `NodeMCU 1.0`，ESP32 如 `ESP32C5 Dev Module`），上传。
+3. 开发板选择对应型号（ESP8266 NodeMCU 板选 `NodeMCU 1.0 (ESP-12E Module)`，ESP32 如 `ESP32C5 Dev Module`），上传。
+   - **板型必须与实际硬件一致**，板型配置里的晶振频率写错会让 UART 波特率整体偏移（如选了 40MHz 晶振的 `Arduino Primo`，而 NodeMCU 实际是 26MHz 晶振，115200 会实际跑在 74880，表现为「串口有数据但不是有效 PONG」）。拿不准时 `esptool` 连接输出的 `Crystal is 26MHz` 是硬件事实，以此为准。
 4. 插入电脑，确认串口出现：
    - macOS：`ls /dev/cu.usbserial-*` 或 `/dev/cu.wchusbserial-*`
    - Linux：`ls /dev/ttyUSB*`（用户需在 `dialout` 组）
@@ -280,6 +282,32 @@ ESP 芯片必须在复位瞬间拉低 GPIO0（BOOT）才能进入 UART 下载模
 ```bash
 mv ~/Documents/Arduino/libraries/<误放目录> ~/Documents/
 ```
+
+**连接成功但擦写阶段超时（`Timed out waiting for packet content`，发生在 `Running stub...` 之后）**：
+
+说明进下载模式与短包通信正常，高速 stub 在擦写 Flash 时丢包——多见于供电或线材临界。绕过 stub、直接用 ROM bootloader 烧录，慢但稳（115200 约 30 秒，无压缩）。先编译出镜像：
+
+```bash
+arduino-cli compile --fqbn esp8266:esp8266:nodemcuv2 \
+  --build-path /tmp/esp-build core/esp/esp.ino
+```
+
+再用开发板核心自带的 esptool（版本路径以实际为准）以 `--no-stub` 写入，连接阶段仍可配合手动下载模式按键：
+
+```bash
+PY=~/Library/Arduino15/packages/esp8266/tools/python3/3.7.2-post1/python3
+CORE=~/Library/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/tools
+PYTHONPATH=$CORE/pyserial "$PY" "$CORE/esptool/esptool.py" \
+  --port /dev/cu.usbserial-XXXX --baud 115200 --no-stub \
+  --connect-attempts 30 write_flash 0x0 /tmp/esp-build/esp.ino.bin
+```
+
+**`固件握手失败：串口有数据但不是有效 PONG`**：
+
+说明串口双向物理链路是通的，问题在内容层。按概率排查：
+
+1. **板型晶振不匹配（最隐蔽）**：固件按错误的外部晶振频率编译时，UART 实际波特率整体偏移。典型案例：板子是 26MHz 晶振的 NodeMCU，IDE 却选了 40MHz 晶振的 `Arduino Primo`，115200 × 26/40 恰好落在 74880——主机在 115200 收到全是乱码。验证方法：以 74880 打开串口，若能看到 ROM 启动日志且 PONG 帧（`5a 00 02 00 01 00`）反而清晰可读，即可确认。修复：选对板型（`NodeMCU 1.0`）重新烧录。
+2. **固件未烧录 / 烧的是别的 sketch / 版本过旧**：重新烧录 `core/esp/esp.ino`。
 
 **烧录后串口设备消失（`/dev/cu.usbserial-*` 不见，`ioreg` 看不到串口芯片）**：
 
@@ -473,7 +501,7 @@ EXIT
 | `未发现 USB 串口设备` | ESP 未插入或驱动未装 | 检查数据线（须为数据线非充电线）；CH340 芯片装驱动 |
 | `发现多个 USB 串口设备` | 插了多个串口设备 | 把端口名作为第二参数传入 |
 | `打开串口 … 失败 … 端口正被 X (PID N) 占用` | 其他进程持有串口（如 Arduino 串口监视器） | 关闭报错中点名的进程后重试 |
-| `固件握手失败：串口有数据但不是有效 PONG` | 链路通，但固件未烧录 / 烧的是别的 sketch / 版本过旧 | 重新烧录 [core/esp/esp.ino](../../core/esp/esp.ino) |
+| `固件握手失败：串口有数据但不是有效 PONG` | 链路通；板型晶振选错导致波特率偏移，或固件未烧录 / 版本过旧 | 见 §5.5 晶振排错；或重新烧录 [core/esp/esp.ino](../../core/esp/esp.ino) |
 | `固件握手失败：串口完全无数据` | 固件没跑起来（供电不足、处于下载模式）或端口选错 | 按提示检查 LED 心跳；直连电脑而非 hub；见 §5.5 供电不足条目 |
 | `未找到目标 X；当前协处理器仅支持 2.4GHz` | 目标只在 5/6GHz 发射，且固件无双频能力 | 换 ESP32-C5 / Linux / Windows 原生路径，或确认目标有 2.4GHz 信号 |
 | `固件协议版本 vX 与本程序支持的 v1 不兼容` | 固件过旧或过新 | 重新烧录最新 [core/esp/esp.ino](../../core/esp/esp.ino) |

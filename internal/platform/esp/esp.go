@@ -103,6 +103,17 @@ func Open(portName string) (*Injector, error) {
 		return nil, fmt.Errorf("配置串口读超时失败：%w", err)
 	}
 
+	// NodeMCU / ESP 开发板的自动复位电路把 DTR 接到 GPIO0、RTS 接到 EN。
+	// 多数平台的串口驱动打开端口时默认置位 DTR/RTS，使 GPIO0 在复位瞬间
+	// 为低，芯片锁死在 ROM 下载模式——该模式在 115200 下完全静默，
+	// 现象就是 esptool 能连而本程序一个字节都收不到。
+	// 这里显式输出「GPIO0 拉高 → EN 拉低复位 → 释放 EN」时序，
+	// 强制芯片从 Flash 正常启动；无自动复位电路的板子上这些操作无害。
+	if err := resetIntoRun(port); err != nil {
+		_ = port.Close()
+		return nil, fmt.Errorf("复位开发板失败：%w", err)
+	}
+
 	injector := &Injector{port: port, channel: 1}
 
 	// 打开串口会复位板子，boot 完成前发出的命令必丢，先握手确认固件就位。
@@ -112,6 +123,25 @@ func Open(portName string) (*Injector, error) {
 	}
 
 	return injector, nil
+}
+
+// resetIntoRun 通过 DTR/RTS 时序让 ESP 从 Flash 正常启动。
+//
+// 自动复位电路上：DTR 置位（线低）→ GPIO0 被拉低；RTS 置位（线低）→ EN 被拉低。
+// 下载模式要求复位释放瞬间 GPIO0 为低，正常启动要求 GPIO0 为高。
+// 因此先保证 GPIO0 高（DTR 断开），再拉低 EN 保持 100ms，
+// 最后释放 EN，芯片即从 Flash 启动。
+func resetIntoRun(port serial.Port) error {
+	if err := port.SetDTR(false); err != nil {
+		return err
+	}
+	if err := port.SetRTS(true); err != nil {
+		return err
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	return port.SetRTS(false)
 }
 
 // DefaultPort 枚举 USB 串口设备：恰好一个时直接返回，
@@ -334,6 +364,14 @@ func (i *Injector) readFrame(timeout time.Duration) (byte, []byte, error) {
 	chunk := make([]byte, 128)
 
 	for {
+		// 先消费缓冲区内的完整帧，再向串口读取新数据。
+		// 固件批量回传时一次读取常携带多个帧（扫描条目可达几十条），
+		// 若每轮先阻塞读再解析，残留帧会在固件发完静默后无谓等到超时。
+		if cmd, payload, rest, ok := DecodeReply(i.rx); ok {
+			i.rx = rest
+			return cmd, payload, nil
+		}
+
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			return 0, nil, errFrameTimeout
@@ -356,14 +394,6 @@ func (i *Injector) readFrame(timeout time.Duration) (byte, []byte, error) {
 		i.observedRx = true
 
 		i.rx = append(i.rx, chunk[:n]...)
-
-		cmd, payload, rest, ok := DecodeReply(i.rx)
-		if !ok {
-			continue
-		}
-
-		i.rx = rest
-		return cmd, payload, nil
 	}
 }
 
