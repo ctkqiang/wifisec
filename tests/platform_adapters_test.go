@@ -1,10 +1,10 @@
 package tests
 
 import (
+	platformlinux "github.com/ctkqiang/wifisec/internal/platform/linux"
+	platformtermux "github.com/ctkqiang/wifisec/internal/platform/termux"
+	platformwindows "github.com/ctkqiang/wifisec/internal/platform/windows"
 	"testing"
-	platformlinux "wifisec/internal/platform/linux"
-	platformtermux "wifisec/internal/platform/termux"
-	platformwindows "wifisec/internal/platform/windows"
 )
 
 func TestParseTermuxCapabilities(t *testing.T) {

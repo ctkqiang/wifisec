@@ -17,6 +17,8 @@
   <a href="#固件烧录"><img src="https://img.shields.io/badge/协处理器-ESP8266_·_ESP32-FF7D00.svg" alt="ESP"></a>
   <a href="#工作方式"><img src="https://img.shields.io/badge/平台-macOS_·_Linux_·_Windows_·_Termux-165DFF.svg" alt="平台"></a>
   <a href="#编译与运行"><img src="https://img.shields.io/badge/构建-make-00B42A.svg" alt="make"></a>
+  <a href="https://github.com/ctkqiang/wifisec/actions/workflows/compile-cross-platform.yml"><img src="https://img.shields.io/github/actions/workflow/status/ctkqiang/wifisec/compile-cross-platform.yml" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/许可证-GPL--3.0-blue.svg" alt="GPL-3.0"></a>
 </p>
 
 ---
@@ -186,6 +188,14 @@ wifisec/
 gh release download --repo ctkqiang/wifisec --pattern 'wifisec-linux-amd64'   # 按文件名下载
 ```
 
+### go install（最简单）
+
+```bash
+go install github.com/ctkqiang/wifisec/cmd@latest
+```
+
+> `go install` 使用目录名作为二进制名。默认安装到 `$(go env GOPATH)/bin/`（macOS/Linux 通常为 `~/go/bin/`），首次安装后记得把这个目录放进 `PATH`。由于二进制入口在 `cmd/` 下，安装后的默认文件名是 `cmd`；你可以 `mv $(go env GOPATH)/bin/cmd $(go env GOPATH)/bin/wifisec`，或者直接 `alias wifisec=$(go env GOPATH)/bin/cmd`。
+
 ## 编译与运行
 
 ### 前置条件
@@ -258,7 +268,11 @@ make test
 
 ## 许可证
 
-暂未附带开源许可证文件；如需复用代码请先与作者联系。
+本项目采用 [GNU General Public License v3.0](LICENSE) 开源许可证：
+
+- 可自由使用、修改与分发源代码
+- 修改后再分发须同样以 GPL-3.0 开源
+- 分发时必须附许可证全文与版权声明
 
 
 ---

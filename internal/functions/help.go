@@ -1,9 +1,9 @@
 package functions
 
 import (
+	"github.com/ctkqiang/wifisec/internal/constants"
+	"github.com/ctkqiang/wifisec/internal/utilities"
 	"strings"
-	"wifisec/internal/constants"
-	"wifisec/internal/utilities"
 )
 
 // helpUsageLines 汇总全部子命令的用法说明，与 cmd/main.go 的

@@ -1,10 +1,10 @@
 package tests
 
 import (
+	"github.com/ctkqiang/wifisec/internal/radio"
 	"os"
 	"path/filepath"
 	"testing"
-	"wifisec/internal/radio"
 )
 
 const fixtureJSON = `{

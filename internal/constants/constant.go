@@ -1,8 +1,8 @@
 package constants
 
 import (
+	"github.com/ctkqiang/wifisec/internal/model"
 	"log/slog"
-	"wifisec/internal/model"
 )
 
 const (

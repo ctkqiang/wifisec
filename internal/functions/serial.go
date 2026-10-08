@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sort"
 
-	"wifisec/internal/constants"
-	"wifisec/internal/utilities"
+	"github.com/ctkqiang/wifisec/internal/constants"
+	"github.com/ctkqiang/wifisec/internal/utilities"
 
 	"go.bug.st/serial/enumerator"
 )

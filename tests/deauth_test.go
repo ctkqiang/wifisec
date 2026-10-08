@@ -1,10 +1,10 @@
 package tests
 
 import (
+	"github.com/ctkqiang/wifisec/internal/functions"
+	platformlinux "github.com/ctkqiang/wifisec/internal/platform/linux"
 	"net"
 	"testing"
-	"wifisec/internal/functions"
-	platformlinux "wifisec/internal/platform/linux"
 )
 
 func TestSelectDeauthTargets(t *testing.T) {

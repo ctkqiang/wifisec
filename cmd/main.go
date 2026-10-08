@@ -1,13 +1,13 @@
 package main
 
 import (
+	"github.com/ctkqiang/wifisec/internal/constants"
+	"github.com/ctkqiang/wifisec/internal/functions"
+	platformdarwin "github.com/ctkqiang/wifisec/internal/platform/darwin"
+	"github.com/ctkqiang/wifisec/internal/utilities"
 	"os"
 	"os/signal"
 	"syscall"
-	"wifisec/internal/constants"
-	"wifisec/internal/functions"
-	platformdarwin "wifisec/internal/platform/darwin"
-	"wifisec/internal/utilities"
 )
 
 var (

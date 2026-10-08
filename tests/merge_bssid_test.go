@@ -1,9 +1,9 @@
 package tests
 
 import (
+	"github.com/ctkqiang/wifisec/internal/functions"
+	platformdarwin "github.com/ctkqiang/wifisec/internal/platform/darwin"
 	"testing"
-	"wifisec/internal/functions"
-	platformdarwin "wifisec/internal/platform/darwin"
 )
 
 func TestMergeCoreWLANBSSID(t *testing.T) {

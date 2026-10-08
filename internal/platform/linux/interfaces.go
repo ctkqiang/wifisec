@@ -1,12 +1,12 @@
 package linux
 
 import (
+	"github.com/ctkqiang/wifisec/internal/constants"
 	"net"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-	"wifisec/internal/constants"
 )
 
 // fallbackNamePrefixes 是 /proc/net/wireless 不可读时的兜底识别规则，

@@ -3,12 +3,12 @@ package utilities
 import (
 	"context"
 	"fmt"
+	"github.com/ctkqiang/wifisec/internal/constants"
 	"io"
 	"log/slog"
 	"os"
 	"sync"
 	"time"
-	"wifisec/internal/constants"
 )
 
 var (

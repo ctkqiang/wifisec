@@ -2,11 +2,11 @@ package functions
 
 import (
 	"fmt"
+	"github.com/ctkqiang/wifisec/internal/constants"
+	"github.com/ctkqiang/wifisec/internal/radio"
+	"github.com/ctkqiang/wifisec/internal/utilities"
 	"regexp"
 	"strings"
-	"wifisec/internal/constants"
-	"wifisec/internal/radio"
-	"wifisec/internal/utilities"
 )
 
 // iwRegPattern 从 `iw reg get` 输出中提取内核当前生效的法规域国码。

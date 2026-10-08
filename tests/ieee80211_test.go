@@ -1,9 +1,9 @@
 package tests
 
 import (
+	"github.com/ctkqiang/wifisec/internal/ieee80211"
 	"net"
 	"testing"
-	"wifisec/internal/ieee80211"
 )
 
 func TestBuildDeauthFrame(t *testing.T) {

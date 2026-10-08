@@ -2,8 +2,8 @@ package utilities
 
 import (
 	"fmt"
+	"github.com/ctkqiang/wifisec/internal/model"
 	"os"
-	"wifisec/internal/model"
 )
 
 var globalCommandRegistry = make(map[string]CommandFunction)

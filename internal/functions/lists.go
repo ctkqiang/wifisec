@@ -5,6 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ctkqiang/wifisec/internal/constants"
+	platformlinux "github.com/ctkqiang/wifisec/internal/platform/linux"
+	platformwindows "github.com/ctkqiang/wifisec/internal/platform/windows"
+	"github.com/ctkqiang/wifisec/internal/utilities"
 	"net"
 	"os"
 	"os/exec"
@@ -14,10 +18,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"wifisec/internal/constants"
-	platformlinux "wifisec/internal/platform/linux"
-	platformwindows "wifisec/internal/platform/windows"
-	"wifisec/internal/utilities"
 )
 
 const (

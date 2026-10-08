@@ -2,11 +2,11 @@ package tests
 
 import (
 	"bytes"
+	"github.com/ctkqiang/wifisec/internal/functions"
 	"io"
 	"os"
 	"strings"
 	"testing"
-	"wifisec/internal/functions"
 )
 
 func captureStdout(t *testing.T, fn func()) string {

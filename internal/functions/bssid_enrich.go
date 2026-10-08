@@ -2,12 +2,12 @@ package functions
 
 import (
 	"fmt"
+	"github.com/ctkqiang/wifisec/internal/constants"
+	platformdarwin "github.com/ctkqiang/wifisec/internal/platform/darwin"
 	"os"
 	"strconv"
 	"strings"
 	"time"
-	"wifisec/internal/constants"
-	platformdarwin "wifisec/internal/platform/darwin"
 )
 
 // helperWaitTimeout 是终端实例等待 helper（系统弹窗 + CoreWLAN 扫描）

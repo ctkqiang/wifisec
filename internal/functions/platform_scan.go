@@ -2,9 +2,9 @@ package functions
 
 import (
 	"errors"
-	platformlinux "wifisec/internal/platform/linux"
-	platformtermux "wifisec/internal/platform/termux"
-	platformwindows "wifisec/internal/platform/windows"
+	platformlinux "github.com/ctkqiang/wifisec/internal/platform/linux"
+	platformtermux "github.com/ctkqiang/wifisec/internal/platform/termux"
+	platformwindows "github.com/ctkqiang/wifisec/internal/platform/windows"
 )
 
 // 本文件是应用层与三个外部平台适配器（Linux iw / Windows netsh / Termux API）

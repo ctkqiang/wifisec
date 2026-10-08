@@ -122,6 +122,33 @@
       <!-- ---------- 快速开始 ---------- -->
       <section id="quickstart">
         <h2>快速开始<a class="anchor" href="#quickstart">#</a></h2>
+        <p>三种安装方式，任选其一：</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>方式</th><th>适用</th><th>命令</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><strong>go install</strong>（推荐）</td>
+                <td>已有 Go 环境</td>
+                <td><code>go install github.com/ctkqiang/wifisec/cmd@latest</code></td>
+              </tr>
+              <tr>
+                <td>GitHub Release</td>
+                <td>无 Go 环境</td>
+                <td>上方「下载」区直接拿对应平台产物</td>
+              </tr>
+              <tr>
+                <td>源码编译</td>
+                <td>想改代码</td>
+                <td><code>git clone … && make build</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="alert info">
+          <span class="alert-icon">ⓘ</span>
+          <div><code>go install</code> 安装到 <code>$(go env GOPATH)/bin/</code>，首次使用记得把该目录加进 <code>PATH</code>。安装后的二进制名是 <code>cmd</code>（取目录名），可 <code>mv</code> 或 <code>alias</code> 为 <code>wifisec</code>。</div>
+        </div>
         <ol class="steps">
           <li><span class="step-dot">1</span><strong>编译</strong>依赖 Go 1.26+，无 CGO：<pre><code class="lang-bash">make build   <span class="cmt"># 产物 build/wifisec（macOS 额外产出 .app bundle 供定位授权）</span></code></pre></li>
           <li><span class="step-dot">2</span><strong>烧录固件</strong>一块 ESP8266 开发板（NodeMCU / Wemos D1 mini）：见下方「固件烧录」。</li>

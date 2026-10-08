@@ -1,9 +1,9 @@
 package tests
 
 import (
+	"github.com/ctkqiang/wifisec/internal/functions"
 	"strings"
 	"testing"
-	"wifisec/internal/functions"
 )
 
 func TestParseIWScanOutput(t *testing.T) {

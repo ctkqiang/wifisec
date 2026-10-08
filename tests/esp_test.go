@@ -1,8 +1,8 @@
 package tests
 
 import (
+	platformesp "github.com/ctkqiang/wifisec/internal/platform/esp"
 	"testing"
-	platformesp "wifisec/internal/platform/esp"
 )
 
 // TestEncodeCommand 验证主机→固件帧布局：魔数、命令字、小端长度与 payload。
