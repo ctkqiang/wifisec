@@ -29,6 +29,7 @@
 - [命令一览](#命令一览)
 - [串口协议](#串口协议)
 - [项目结构](#项目结构)
+- [下载](#下载)
 - [编译与运行](#编译与运行)
 - [固件烧录](#固件烧录)
 - [测试](#测试)
@@ -170,6 +171,21 @@ wifisec/
 
 ---
 
+## 下载
+
+打 tag（`v*`）会触发 CI 自动发布到 [GitHub Releases](https://github.com/ctkqiang/wifisec/releases)，含三平台产物与合并后的中文 PDF 手册：
+
+| 平台 | 文件 | 说明 |
+| ---- | ---- | ---- |
+| macOS | `wifisec-macos-app.zip` | 解压后得 `wifisec.app`，定位授权依赖 bundle |
+| Linux | `wifisec-linux-amd64` | 单文件二进制，`chmod +x` 后运行 |
+| Windows | `wifisec-windows-amd64.exe` | 单文件可执行 |
+| 文档 | `wifisec-docs.pdf` | 全部命令、串口协议、烧录排错合并手册 |
+
+```bash
+gh release download --repo ctkqiang/wifisec --pattern 'wifisec-linux-amd64'   # 按文件名下载
+```
+
 ## 编译与运行
 
 ### 前置条件
@@ -243,3 +259,26 @@ make test
 ## 许可证
 
 暂未附带开源许可证文件；如需复用代码请先与作者联系。
+
+
+---
+
+<div align="center">
+
+<h2>支持</h2>
+
+<p>如果您觉得本项目对您有帮助，欢迎请我喝杯咖啡</p>
+<p><sub>您的支持是我持续维护和改进的动力</sub></p>
+
+<br/>
+
+<strong>微信扫码捐赠</strong><br/><br/>
+<img src="https://raw.gitcode.com/ctkqiang_sr/ctkqiang_sr/raw/main/mm_reward_qrcode_1778988737577.png"
+     alt="微信扫码捐赠"
+     width="240"
+     style="border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);" />
+
+<br/>
+<br/>
+
+---

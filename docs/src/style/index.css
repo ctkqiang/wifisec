@@ -313,6 +313,79 @@ a:focus-visible, button:focus-visible {
   background: var(--accent);
 }
 
+/* ---------- Hero 下载区 ---------- */
+.hero-download {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px dashed var(--border);
+}
+.hero-download-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 12px;
+}
+.hero-download-ver {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--primary);
+  background: var(--primary-sub);
+  border-radius: 99px;
+  padding: 2px 9px;
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+.dl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.dl-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.18s, box-shadow 0.18s, border-color 0.18s;
+}
+.dl-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+  border-color: var(--primary);
+}
+.dl-btn .dl-os {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-1);
+}
+.dl-btn .dl-desc {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.dl-btn.pdf {
+  border-color: rgba(255, 111, 165, 0.35);
+}
+.dl-btn.pdf:hover {
+  border-color: var(--accent);
+}
+.dl-all {
+  font-size: 13px;
+  color: var(--text-3);
+}
+.dl-all:hover {
+  color: var(--primary);
+}
+
+/* 无 release 时下载区整体隐藏（JS 探测失败则保持隐藏） */
+.hero-download.hidden {
+  display: none;
+}
+
 /* ---------- 小节标题：左侧青色竖条 ---------- */
 section {
   margin-bottom: 48px;

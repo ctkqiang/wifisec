@@ -111,6 +111,35 @@
     document.body.removeChild(ta);
   }
 
+  // ---------- Hero 下载区：拉取最新 release 版本号 ----------
+  // 无 release 或 API 限流时隐藏整个下载区，避免给访客死链
+  var dlSection = document.getElementById('download');
+  var dlVer = document.getElementById('dlVer');
+
+  if (dlSection) {
+    fetch('https://api.github.com/repos/ctkqiang/wifisec/releases/latest', {
+      headers: { Accept: 'application/vnd.github+json' }
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error('no release');
+        return r.json();
+      })
+      .then(function (rel) {
+        if (dlVer && rel.tag_name) dlVer.textContent = rel.tag_name;
+      })
+      .catch(function () {
+        // 首次 tag 前仓库无 release：隐藏下载区，只留「查看全部版本」跳转
+        dlSection.classList.add('hidden');
+        var all = dlSection.querySelector('.dl-all');
+        if (all) {
+          dlSection.classList.remove('hidden');
+          dlSection.querySelector('.dl-grid').style.display = 'none';
+          dlSection.querySelector('.hero-download-title').textContent = '尚未发布版本';
+          if (dlVer) dlVer.style.display = 'none';
+        }
+      });
+  }
+
   // ---------- 移动端抽屉 ----------
   var sidebar = document.getElementById('sidebar');
   var menuToggle = document.getElementById('menuToggle');
