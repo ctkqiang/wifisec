@@ -1,34 +1,38 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
   <defs>
-    <!-- 朱砂印泥红：中式印章主色 -->
-    <linearGradient id="seal" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#F5575F"/>
-      <stop offset="1" stop-color="#C62F39"/>
+    <!-- 牌面主渐变：亮青过渡到深青，二次元清爽感的来源 -->
+    <linearGradient id="body" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3DE4F0"/>
+      <stop offset="0.55" stop-color="#00B8D4"/>
+      <stop offset="1" stop-color="#0093A8"/>
     </linearGradient>
-    <!-- 鎏金：乾坤圈与火尖 -->
-    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#F9CD48"/>
-      <stop offset="1" stop-color="#F0922B"/>
-    </linearGradient>
+    <!-- 左上玻璃高光：让纯色牌面有通透层次而非一块死色 -->
+    <radialGradient id="gloss" cx="0.32" cy="0.22" r="0.85">
+      <stop offset="0" stop-color="#D6FAFE" stop-opacity="0.85"/>
+      <stop offset="0.5" stop-color="#D6FAFE" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#D6FAFE" stop-opacity="0"/>
+    </radialGradient>
   </defs>
 
-  <!-- 印章底：圆角方章 -->
-  <rect x="8" y="8" width="104" height="104" rx="24" fill="url(#seal)"/>
-  <!-- 内缘细金线：仿双缘印章的工整感 -->
-  <rect x="15.5" y="15.5" width="89" height="89" rx="18.5"
-        fill="none" stroke="#F9CD48" stroke-opacity="0.45" stroke-width="1.6"/>
+  <!-- 圆角方牌：大圆角贴合文档站的二次元圆角语言 -->
+  <rect x="9" y="9" width="102" height="102" rx="28" fill="url(#body)"/>
+  <rect x="9" y="9" width="102" height="102" rx="28" fill="url(#gloss)"/>
+  <!-- 内缘细白线：牌面收边，小尺寸（favicon/顶栏）下轮廓更清晰 -->
+  <rect x="12.5" y="12.5" width="95" height="95" rx="25"
+        fill="none" stroke="#FFFFFF" stroke-opacity="0.28" stroke-width="1.5"/>
 
-  <!-- 顶部火尖：哪吒火尖枪意象，点出「攻防之刃」 -->
-  <path d="M60 20 L66.5 31 Q60 28.4 53.5 31 Z" fill="url(#gold)"/>
-
-  <!-- 乾坤圈：护网之环，环住下方电波 -->
-  <circle cx="60" cy="66" r="32" fill="none" stroke="url(#gold)"
-          stroke-width="4.2" opacity="0.95"/>
-
-  <!-- WiFi 电波：两道弧 + 印心圆点，如踏风火轮发波 -->
+  <!-- WiFi 电波：三道弧围绕下方圆点，白色实心描边，深青底上最醒目的识别元素 -->
   <g fill="none" stroke="#FFFFFF" stroke-linecap="round">
-    <path d="M44 70 A 22 22 0 0 1 76 70" stroke-width="5.6"/>
-    <path d="M52 78 A 11.5 11.5 0 0 1 68 78" stroke-width="5.6"/>
+    <path d="M29 84 A31 31 0 0 1 91 84" stroke-width="6.5"/>
+    <path d="M39 84 A21 21 0 0 1 81 84" stroke-width="6.5"/>
+    <path d="M49 84 A11 11 0 0 1 71 84" stroke-width="6.5"/>
   </g>
-  <circle cx="60" cy="87" r="5.2" fill="#FFFFFF"/>
+  <circle cx="60" cy="84" r="5.6" fill="#FFFFFF"/>
+
+  <!-- 右上四角星芒：二次元气质点缀，同时平衡电波偏下的视觉重心 -->
+  <path d="M93 21 L95.4 26.6 L101 29 L95.4 31.4 L93 37 L90.6 31.4 L85 29 L90.6 26.6 Z"
+        fill="#EAFDFF"/>
+  <!-- 两颗小粒子：悬浮的信号尘埃感 -->
+  <circle cx="28" cy="32" r="2.6" fill="#EAFDFF" opacity="0.85"/>
+  <circle cx="99" cy="80" r="2" fill="#EAFDFF" opacity="0.6"/>
 </svg>
