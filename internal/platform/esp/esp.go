@@ -225,11 +225,12 @@ func EncodeCommand(cmd byte, payload []byte) []byte {
 
 // ParseScanEntry 解析一条扫描条目载荷。导出供 tests/ 做表驱动测试。
 func ParseScanEntry(payload []byte) (Network, error) {
+	var entry Network
+
 	if len(payload) < 9 {
 		return Network{}, errors.New("扫描条目长度不足 9 字节")
 	}
 
-	var entry Network
 	entry.BSSID = fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x",
 		payload[0], payload[1], payload[2], payload[3], payload[4], payload[5])
 	entry.Channel = int(payload[6])
