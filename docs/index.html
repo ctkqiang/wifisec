@@ -66,6 +66,7 @@
       <section class="hero" id="overview">
         <h1>WifiSec</h1>
         <p class="hero-sub">Go 编写的无线安全测试工具。帧注入跑在 ESP 协处理器上，宿主机零依赖、全平台免 root。</p>
+        <p class="hero-legal">仅限自有或已获书面授权的网络使用。《中华人民共和国网络安全法》第二十七条禁止干扰他人网络正常功能；非法 deauth 干扰还可能触犯《刑法》第二百八十五条第三款、第二百八十六条。</p>
         <div class="badge-row">
           <span class="badge"><span class="dot"></span>Go 1.26</span>
           <span class="badge orange"><span class="dot"></span>ESP8266 / ESP32</span>
@@ -231,10 +232,6 @@ arduino-cli upload --fqbn esp8266:esp8266:nodemcuv2 \
       <!-- ---------- 安全与合规 ---------- -->
       <section id="compliance">
         <h2>安全与合规<a class="anchor" href="#compliance">#</a></h2>
-        <div class="alert danger">
-          <span class="alert-icon">⚠</span>
-          <div><strong>中华人民共和国境内法律红线：</strong>《中华人民共和国网络安全法》第二十七条明确禁止从事非法侵入他人网络、干扰他人网络正常功能、窃取网络数据等危害网络安全的活动；对他人无线网络实施 deauth 干扰，可能同时触犯《中华人民共和国刑法》第二百八十五条第三款（提供侵入、非法控制计算机信息系统程序、工具罪）与第二百八十六条（破坏计算机信息系统罪）。本项目仅用于<strong>自有网络或已获书面授权</strong>的安全测试，使用者须自行确认符合所在地法律法规。</div>
-        </div>
         <p>能力边界（重构过程中刻意保持，不自动增加攻击面）：</p>
         <ul>
           <li>仅 deauth 一种帧类型，帧构造收敛在 <code>internal/ieee80211</code> 纯字节编解码层；</li>
