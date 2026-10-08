@@ -571,6 +571,39 @@ pre:hover .copy-btn {
   opacity: 1;
 }
 
+/* ---------- 开发实况截图 ---------- */
+.screenshot-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 14px 0 18px;
+}
+@media (max-width: 900px) {
+  .screenshot-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.screenshot {
+  margin: 0;
+}
+.screenshot img {
+  width: 100%;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.screenshot:hover img {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+}
+.screenshot figcaption {
+  font-size: 12.5px;
+  color: var(--text-3);
+  text-align: center;
+  margin-top: 8px;
+}
+
 /* ---------- 提示框：圆角胶囊风 ---------- */
 .alert {
   display: flex;

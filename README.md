@@ -61,6 +61,19 @@ WifiSec 是 Go 编写的无线安全测试工具，采用 Hexagonal Architecture
 
 ---
 
+## 开发实况
+
+<p align="center">
+  <img src="docs/img/dev-serial-go.jpg" alt="serial.go 代码与终端输出" width="49%">
+  <img src="docs/img/dev-corewlan-scan.jpg" alt="corewlan_darwin.m 代码与扫描结果" width="49%">
+</p>
+
+<p align="center">
+  <sub>左：串口设备枚举代码与 `wifisec serial` 输出 · 右：CoreWLAN 扫描封装与 `wifisec list` 输出</sub>
+</p>
+
+---
+
 ## 工作方式
 
 两条注入路径按构建与平台自动分发：
