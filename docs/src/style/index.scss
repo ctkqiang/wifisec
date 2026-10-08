@@ -1,0 +1,588 @@
+// ============================================================
+// wifisec 文档站样式
+// 布局与组件语言参考 Arco Design，主色为二次元青（#00B8D4）；
+// 灰阶沿用 Arco 灰阶 1-10、圆角 2/4/12px。明暗双主题用
+// data-theme 切换，暗色底带青调，不使用纯灰黑。
+// ============================================================
+
+// ---------- 设计令牌 ----------
+// 主色采用二次元青：高饱和亮青做强调，浅青白铺底；
+// 暗色下不直接反用浅色主色，而是提亮一档保证深底可读。
+$primary:         #00B8D4;
+$primary-hover:   #26D9E8;
+$primary-active:  #0097A7;
+$primary-light:   #E2FAFD;
+
+$success:         #00B42A;
+$warning:         #FF7D00;
+$danger:          #F53F3F;
+
+$gray-1:          #F7F8FA;
+$gray-2:          #F2F3F5;
+$gray-3:          #E5E6EB;
+$gray-4:          #C9CDD4;
+$gray-5:          #86909C;
+$gray-6:          #4E5969;
+$gray-7:          #1D2129;
+
+$radius-sm:       2px;
+$radius-md:       4px;
+$radius-lg:       12px;
+
+$shadow-card:     0 4px 10px rgba(29, 33, 41, 0.06);
+$sidebar-width:   248px;
+$header-height:   60px;
+
+// ---------- 主题变量（暗色覆盖） ----------
+:root {
+  --bg-page:      #FFFFFF;
+  --bg-page-sub:  #{$gray-1};
+  --bg-card:      #FFFFFF;
+  --bg-code:      #1D2129;
+  --bg-code-sub:  #34363D;
+  --text-1:       #{$gray-7};
+  --text-2:       #{$gray-6};
+  --text-3:       #{$gray-5};
+  --border:       #{$gray-3};
+  --primary:      #{$primary};
+  --primary-sub:  #{$primary-light};
+  --shadow:       #{$shadow-card};
+  color-scheme:   light;
+}
+
+[data-theme='dark'] {
+  // 深青黑：底色混入青色而非纯灰，暗色模式也保持主题温度
+  --bg-page:      #0D1A20;
+  --bg-page-sub:  #12262F;
+  --bg-card:      #132832;
+  --bg-code:      #0A1419;
+  --bg-code-sub:  #213944;
+  --text-1:       rgba(255, 255, 255, 0.92);
+  --text-2:       rgba(220, 244, 248, 0.72);
+  --text-3:       rgba(190, 228, 235, 0.45);
+  --border:       #23424E;
+  --primary:      #4FE3F0;
+  --primary-sub:  rgba(0, 188, 212, 0.18);
+  --shadow:       0 4px 10px rgba(0, 0, 0, 0.35);
+  color-scheme:   dark;
+}
+
+// ---------- 基础 ----------
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-1);
+  background: var(--bg-page);
+  transition: background 0.2s, color 0.2s;
+}
+
+::selection {
+  background: rgba(0, 188, 214, 0.24);
+}
+
+// 青调滚动条：主题感延伸到页面边缘
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 6px;
+  border: 2px solid var(--bg-page);
+  &:hover { background: var(--primary); }
+}
+::-webkit-scrollbar-track { background: transparent; }
+* { scrollbar-color: var(--border) transparent; }
+
+a { color: var(--primary); }
+a:focus-visible, button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+// ---------- 顶栏 ----------
+.site-header {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: $header-height;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 24px;
+  background: var(--bg-page);
+  border-bottom: 1px solid var(--border);
+  z-index: 100;
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+    color: var(--text-1);
+    font-weight: 600;
+    font-size: 17px;
+
+    img { width: 30px; height: 30px; }
+
+    .version {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--primary);
+      background: var(--primary-sub);
+      padding: 1px 8px;
+      border-radius: 10px;
+    }
+  }
+
+  .header-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+}
+
+.icon-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: $radius-md;
+  background: var(--bg-card);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+  }
+
+  svg { width: 16px; height: 16px; }
+}
+
+// ---------- 侧边导航 ----------
+.layout {
+  display: flex;
+  padding-top: $header-height;
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: fixed;
+  top: $header-height;
+  bottom: 0;
+  left: 0;
+  width: $sidebar-width;
+  padding: 20px 12px 40px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  background: var(--bg-page);
+
+  .nav-group {
+    margin-bottom: 20px;
+  }
+
+  .nav-group-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 0 12px 6px;
+  }
+
+  a {
+    display: block;
+    padding: 7px 12px;
+    border-radius: $radius-md;
+    color: var(--text-2);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+    transition: all 0.15s;
+
+    &:hover {
+      color: var(--primary);
+      background: var(--bg-page-sub);
+    }
+
+    &.active {
+      color: var(--primary);
+      background: var(--primary-sub);
+      font-weight: 500;
+      border-left-color: var(--primary);
+      border-radius: 0 $radius-md $radius-md 0;
+    }
+  }
+}
+
+// ---------- 正文 ----------
+.content {
+  flex: 1;
+  margin-left: $sidebar-width;
+  padding: 40px 48px 120px;
+  max-width: 1020px;
+}
+
+.hero {
+  position: relative;
+  padding: 40px 36px 34px;
+  margin-bottom: 32px;
+  border-radius: $radius-lg;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 55% 120% at 88% -10%, rgba(38, 217, 232, 0.22), transparent),
+    radial-gradient(ellipse 40% 80% at 8% 110%, rgba(0, 188, 214, 0.10), transparent),
+    var(--primary-sub);
+  border: 1px solid var(--border);
+
+  h1 {
+    font-size: 32px;
+    line-height: 1.3;
+    margin-bottom: 10px;
+    // 青色渐变标题：亮青到青白，二次元主题的第一视觉锚点
+    background: linear-gradient(100deg, $primary-active 0%, $primary 45%, #7BE9F4 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .hero-sub {
+    color: var(--text-2);
+    max-width: 640px;
+    margin-bottom: 18px;
+  }
+}
+
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--primary);
+  }
+
+  &.green .dot { background: #{$success}; }
+  &.orange .dot { background: #{$warning}; }
+  &.red .dot { background: #{$danger}; }
+}
+
+section {
+  margin-bottom: 44px;
+  scroll-margin-top: #{$header-height + 16px};
+
+  > h2 {
+    font-size: 22px;
+    line-height: 1.4;
+    padding-bottom: 12px;
+    margin-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+
+    .anchor {
+      margin-left: 6px;
+      font-size: 14px;
+      color: var(--text-3);
+      text-decoration: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    &:hover .anchor { opacity: 1; }
+  }
+
+  > h3 {
+    font-size: 16px;
+    margin: 24px 0 10px;
+  }
+
+  p { color: var(--text-2); margin-bottom: 12px; }
+
+  ul, ol {
+    padding-left: 22px;
+    color: var(--text-2);
+    margin-bottom: 12px;
+
+    li { margin-bottom: 4px; }
+  }
+}
+
+// ---------- 卡片与表格 ----------
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: $radius-lg;
+  box-shadow: var(--shadow);
+  padding: 20px 24px;
+  margin-bottom: 16px;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+
+  @media (max-width: 900px) { grid-template-columns: 1fr; }
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 14px 0 18px;
+  font-size: 13.5px;
+
+  th {
+    background: var(--bg-page-sub);
+    color: var(--text-1);
+    font-weight: 600;
+    text-align: left;
+    padding: 9px 14px;
+    border: 1px solid var(--border);
+  }
+
+  td {
+    padding: 9px 14px;
+    border: 1px solid var(--border);
+    color: var(--text-2);
+  }
+
+  tbody tr:hover td { background: var(--bg-page-sub); }
+}
+
+// ---------- 代码块 ----------
+code {
+  font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+
+:not(pre) > code {
+  background: var(--bg-page-sub);
+  border: 1px solid var(--border);
+  border-radius: $radius-sm;
+  padding: 1px 6px;
+  color: var(--primary);
+}
+
+pre {
+  position: relative;
+  background: var(--bg-code);
+  border-radius: $radius-lg;
+  padding: 14px 18px;
+  margin: 12px 0 18px;
+  overflow-x: auto;
+
+  code {
+    color: #E5E6EB;
+    font-size: 13px;
+    line-height: 1.65;
+  }
+}
+
+// 终端演示着色：提示符灰、输出行青白，与青主题统一
+pre .prompt { color: #86909C; user-select: none; }
+pre .out { color: #7BE9F4; }
+
+.copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: $radius-md;
+  background: var(--bg-code-sub);
+  color: #C9CDD4;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+
+  svg { width: 14px; height: 14px; }
+}
+
+pre:hover .copy-btn { opacity: 1; }
+
+.copy-btn.copied { color: #6EDB8A; opacity: 1; }
+
+// ---------- 提示条（Arco Alert） ----------
+.alert {
+  display: flex;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: $radius-md;
+  margin: 14px 0 18px;
+  font-size: 13.5px;
+  border: 1px solid;
+  color: var(--text-2);
+
+  .alert-icon { flex-shrink: 0; margin-top: 2px; }
+
+  &.info    { background: rgba(0, 188, 212, 0.09);  border-color: rgba(0, 188, 212, 0.4);   .alert-icon { color: #{$primary}; } }
+  &.success { background: rgba(0, 180, 42, 0.08);   border-color: rgba(0, 180, 42, 0.35);   .alert-icon { color: #{$success}; } }
+  &.warning { background: rgba(255, 125, 0, 0.08);  border-color: rgba(255, 125, 0, 0.35);  .alert-icon { color: #{$warning}; } }
+  &.danger  { background: rgba(245, 63, 63, 0.08);  border-color: rgba(245, 63, 63, 0.35);  .alert-icon { color: #{$danger}; } }
+}
+
+// ---------- 命令演示卡片 ----------
+.cmd-demo {
+  .cmd-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+
+    .led {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #{$success};
+      animation: led-blink 1s steps(2) infinite;
+    }
+
+    code { color: var(--text-1); font-size: 14px; font-weight: 500; }
+  }
+
+  .cmd-desc { font-size: 13px; color: var(--text-3); }
+}
+
+@keyframes led-blink {
+  50% { opacity: 0.25; }
+}
+
+// ---------- 标签 ----------
+.tag {
+  display: inline-block;
+  font-size: 12px;
+  line-height: 20px;
+  padding: 0 8px;
+  border-radius: $radius-sm;
+  background: var(--primary-sub);
+  color: var(--primary);
+  margin-right: 6px;
+
+  &.plain { background: var(--bg-page-sub); color: var(--text-2); }
+  &.warn  { background: rgba(255, 125, 0, 0.1); color: #{$warning}; }
+}
+
+// ---------- 步骤时间线（Arco Steps 竖排） ----------
+.steps {
+  list-style: none;
+  padding-left: 0 !important;
+
+  li {
+    position: relative;
+    padding: 0 0 22px 34px;
+
+    &::before {
+      content: '';
+      position: absolute;
+      left: 9px;
+      top: 20px;
+      bottom: -2px;
+      width: 2px;
+      background: var(--border);
+    }
+
+    &:last-child { padding-bottom: 4px; &::before { display: none; } }
+
+    .step-dot {
+      position: absolute;
+      left: 0;
+      top: 3px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: var(--primary-sub);
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    strong { display: block; margin-bottom: 4px; color: var(--text-1); }
+  }
+}
+
+// ---------- 表格横向滚动容器 ----------
+.table-wrap {
+  overflow-x: auto;
+  margin: 14px 0;
+
+  table { margin: 0; }
+}
+
+.muted { color: var(--text-2); font-size: 13.5px; }
+
+// ---------- 代码高亮令牌（终端演示用） ----------
+pre .cmt { color: #86909C; }        // 注释：灰
+pre .str { color: #7DE8B4; }        // 字符串：青绿
+
+// ---------- 页脚 ----------
+footer {
+  margin-left: $sidebar-width;
+  padding: 24px 48px;
+  border-top: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: 13px;
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+// ---------- 移动端 ----------
+.menu-toggle { display: none; }
+
+@media (max-width: 900px) {
+  .menu-toggle { display: inline-flex; }
+
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.25s;
+    z-index: 90;
+    background: var(--bg-card);
+
+    &.open { transform: translateX(0); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16); }
+  }
+
+  .content, footer {
+    margin-left: 0;
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+
+  .hero h1 { font-size: 24px; }
+}

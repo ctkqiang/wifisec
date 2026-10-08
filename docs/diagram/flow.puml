@@ -1,0 +1,60 @@
+@startuml wifisec-deauth-flow
+' WifiSec deauth 执行流程：CLI 参数解析 → 目标解析 → 端口/注入路径选择 → 攻击循环
+skinparam defaultFontName "PingFang SC"
+skinparam activityBackgroundColor #E8F3FF
+skinparam activityBorderColor #165DFF
+skinparam arrowColor #4E5969
+
+start
+:解析 CLI 参数\n(deauth <ssid|bssid> [串口]);
+
+if (目标是 MAC 地址?) then (是)
+  :net.ParseMAC 校验并归一化;
+else (否)
+  :视为 SSID;
+endif
+
+if (指定了串口?) then (是)
+  :使用指定端口;
+else (否)
+  :枚举 USB 串口;
+  if (唯一 USB 串口?) then (是)
+    :自动选定;
+  else (否)
+    #FF7D00:报错退出：\n多设备需手动指定端口;
+    stop
+  endif
+endif
+
+:打开串口 + 复位时序\n(DTR 拉低 → RTS 复位 100ms);
+:握手 PING (重试 15 次 × 500ms);
+if (收到 PONG?) then (是)
+  :解析协议版本与能力位图;
+else (否)
+  #F53F3F:分级诊断：\n无数据 / 噪声 / 端口被占用;
+  stop
+endif
+
+:发送 SCAN 命令;
+:流式接收扫描条目\n(逐条解析 BSSID/信道/RSSI/SSID);
+:收到 DONE 帧 → 汇总;
+
+if (目标命中?) then (是)
+  if (目标为 5/6GHz 且固件仅 2.4GHz?) then (是)
+    #F53F3F:拒绝：报告不可见原因;
+    stop
+  else (否)
+    :构造 deauth 帧\n(剥 radiotap, 34 字节);
+  endif
+else (否)
+  #F53F3F:报错：目标不在协处理器视野;
+  stop
+endif
+
+:进入注入循环\n(200ms 间隔, 每 3s 进度心跳);
+repeat
+  :SET_CHANNEL + INJECT 帧;
+repeat while (未收到 SIGINT?) is (继续)
+:Ctrl-C 统计输出\n(总帧数/目标数/运行时长);
+stop
+@enduml

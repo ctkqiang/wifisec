@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="WifiSec — ESP 协处理器 WiFi deauth 安全测试工具文档">
+  <title>WifiSec 文档 · ESP 协处理器 WiFi 安全测试工具</title>
+  <link rel="icon" type="image/svg+xml" href="logo.svg">
+  <link rel="stylesheet" href="src/style/index.css">
+</head>
+<body>
+  <!-- ============ 顶栏 ============ -->
+  <header class="site-header">
+    <button class="menu-toggle icon-btn" id="menuToggle" aria-label="切换侧边栏">
+      <svg viewBox="0 0 16 16" fill="currentColor"><path d="M2 3.5h12v1.5H2zM2 7.25h12v1.5H2zM2 11h12v1.5H2z"/></svg>
+    </button>
+    <a class="brand" href="#overview">
+      <img src="logo.svg" alt="WifiSec Logo">
+      <span>WifiSec</span>
+      <span class="version">v0.0.1</span>
+    </a>
+    <div class="header-actions">
+      <button class="icon-btn" id="themeToggle" aria-label="切换主题" title="明暗主题切换">
+        <svg class="icon-sun" viewBox="0 0 16 16" fill="currentColor"><path d="M8 4.5A3.5 3.5 0 1 0 8 11.5 3.5 3.5 0 0 0 8 4.5zM8 1v1.8M8 13.2V15M1 8h1.8M13.2 8H15M3.05 3.05l1.27 1.27M11.68 11.68l1.27 1.27M12.95 3.05l-1.27 1.27M4.32 11.68l-1.27 1.27" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="8" r="2.4"/></svg>
+        <svg class="icon-moon" viewBox="0 0 16 16" fill="currentColor"><path d="M13.5 9.7A5.8 5.8 0 0 1 6.3 2.5a5.8 5.8 0 1 0 7.2 7.2z"/></svg>
+      </button>
+      <a class="icon-btn" href="https://github.com/ctkqiang/wifisec" target="_blank" rel="noopener" aria-label="GitHub 仓库" title="GitHub 仓库">
+        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      </a>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- ============ 侧边导航 ============ -->
+    <aside class="sidebar" id="sidebar">
+      <nav class="nav">
+        <div class="nav-group">
+          <div class="nav-group-title">开始</div>
+          <a href="#overview" class="active">项目概述</a>
+          <a href="#paths">工作方式</a>
+          <a href="#quickstart">快速开始</a>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">命令参考</div>
+          <a href="#cmd-list">list · 无线扫描</a>
+          <a href="#cmd-serial">serial · 串口发现</a>
+          <a href="#cmd-deauth">deauth · 帧注入</a>
+          <a href="#cmd-help">help · 用法总览</a>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">固件</div>
+          <a href="#firmware">烧录指南</a>
+          <a href="#protocol">串口协议</a>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">进阶</div>
+          <a href="#troubleshoot">排错手册</a>
+          <a href="#compliance">安全与合规</a>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- ============ 正文 ============ -->
+    <main class="content">
+      <!-- ---------- Hero ---------- -->
+      <section class="hero" id="overview">
+        <h1>WifiSec</h1>
+        <p class="hero-sub">将 Python 版 WiFi deauth 工具重构为 Go 的无线安全测试工具。帧注入跑在 ESP 协处理器上，宿主机零依赖、全平台免 root。</p>
+        <div class="badge-row">
+          <span class="badge"><span class="dot"></span>Go 1.26</span>
+          <span class="badge orange"><span class="dot"></span>ESP8266 / ESP32</span>
+          <span class="badge green"><span class="dot"></span>macOS · Linux · Windows · Termux</span>
+          <span class="badge plain">Hexagonal Architecture</span>
+        </div>
+      </section>
+
+      <!-- ---------- 工作方式 ---------- -->
+      <section id="paths">
+        <h2>工作方式<a class="anchor" href="#paths">#</a></h2>
+        <p>两条注入路径按构建与平台自动分发，应用编排不感知底层注入方式（Hexagonal Architecture：应用层只依赖 <code>frameWriter</code> / <code>channelSetter</code> 两个端口）。</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>路径</th><th>原理</th><th>平台</th><th>权限</th></tr></thead>
+            <tbody>
+              <tr><td><strong>ESP 协处理器</strong>（默认）</td><td>帧注入在板载 ESP8266/ESP32 射频上完成，宿主机经 USB 串口下发协议帧</td><td>macOS / Linux / Windows / Termux</td><td><span class="badge green"><span class="dot"></span>免 root</span></td></tr>
+              <tr><td>Linux 原生</td><td><code>iw</code> 创建 monitor 接口 + AF_PACKET 原始套接字</td><td>Linux / Termux</td><td>root 或 CAP_NET_RAW</td></tr>
+              <tr><td>Windows 原生</td><td>Npcap 驱动注入 + WlanHelper 切 monitor</td><td>Windows</td><td>管理员 + Npcap</td></tr>
+              <tr><td>macOS 原生</td><td>不可用——Apple 未开放 802.11 帧注入 API，返回精确技术说明</td><td>macOS</td><td>—</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="alert info">
+          <span class="alert-icon">ⓘ</span>
+          <div>macOS 用户走协处理器路径：插一块 ESP8266 开发板（约十元），烧录固件后全部功能免 root 可用，同时绕过系统对 BSSID 的定位脱敏。</div>
+        </div>
+      </section>
+
+      <!-- ---------- 快速开始 ---------- -->
+      <section id="quickstart">
+        <h2>快速开始<a class="anchor" href="#quickstart">#</a></h2>
+        <ol class="steps">
+          <li><span class="step-dot">1</span><strong>编译</strong>依赖 Go 1.26+，无 CGO：<pre><code class="lang-bash">make build   <span class="cmt"># 产物 build/wifisec（macOS 额外产出 .app bundle 供定位授权）</span></code></pre></li>
+          <li><span class="step-dot">2</span><strong>烧录固件</strong>一块 ESP8266 开发板（NodeMCU / Wemos D1 mini）：见下方「固件烧录」。</li>
+          <li><span class="step-dot">3</span><strong>确认串口</strong><pre><code class="lang-bash">wifisec serial   <span class="cmt"># USB 设备置顶，记下端口名与 VID:PID</span></code></pre></li>
+          <li><span class="step-dot">4</span><strong>扫描与打击</strong><pre><code class="lang-bash">wifisec list                            <span class="cmt"># 周边网络（主机射频视野）</span>
+wifisec deauth <span class="str">'MyWiFi'</span>                <span class="cmt"># 按 SSID，同名多 AP 全部命中</span>
+wifisec deauth 01:23:45:67:89:ab        <span class="cmt"># 按 BSSID 精确锁定</span></code></pre></li>
+        </ol>
+      </section>
+
+      <!-- ---------- 命令参考 ---------- -->
+      <section id="cmd-list">
+        <h2>list · 无线扫描<a class="anchor" href="#cmd-list">#</a></h2>
+        <p>枚举本机无线接口与周边网络。macOS 经 CoreWLAN + 定位服务取 BSSID（首次使用弹授权窗）；Linux 解析 <code>iw</code>；Windows 解析 <code>netsh</code>。</p>
+        <pre><code class="lang-bash">wifisec list</code></pre>
+        <p>输出含信道、频段、带宽、加密代际、信号/SNR 与信号条。同名 SSID 的 2.4/5GHz AP 分行展示，BSSID 各自独立。</p>
+        <p>完整字段判读见 <a href="feature/wifi_list.md">wifi_list.md</a>。</p>
+      </section>
+
+      <section id="cmd-serial">
+        <h2>serial · 串口发现<a class="anchor" href="#cmd-serial">#</a></h2>
+        <p>枚举系统全部串口（对标 Arduino IDE 端口列表），USB 设备置顶并给出 VID:PID——认芯片才是认板子的正确姿势：</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>VID:PID</th><th>芯片</th><th>常见载板</th></tr></thead>
+            <tbody>
+              <tr><td><code>1A86:7523</code></td><td>CH340/CH341</td><td>NodeMCU、Wemos D1 mini 及多数国产板</td></tr>
+              <tr><td><code>1A86:55D4</code></td><td>CH9102</td><td>较新的 ESP32-S3/C3 开发板</td></tr>
+              <tr><td><code>10C4:EA60</code></td><td>CP2102</td><td>乐鑫官方 DevKit</td></tr>
+              <tr><td><code>0403:6001</code></td><td>FT232RL</td><td>FTDI 转接板</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>完整排错（充电线冒充数据线、brltty 抢占等）见 <a href="feature/wifi_serial.md">wifi_serial.md</a>。</p>
+      </section>
+
+      <section id="cmd-deauth">
+        <h2>deauth · 帧注入<a class="anchor" href="#cmd-deauth">#</a></h2>
+        <p>对目标 AP 持续广播 802.11 deauthentication 帧，200ms 间隔（每秒 5 帧），Ctrl-C 停止并输出统计。协处理器路径下全过程日志：</p>
+        <pre><code class="lang-log">22:40:33.342 [信息] 连接 /dev/cu.usbserial-XXXX，等待固件就绪…
+22:40:34.161 [信息] 协处理器就绪（协议 v1 · 2.4GHz），扫描周边网络…
+22:40:36.391 [信息] 扫描完成：周边 22 个网络，命中目标 1 个
+22:40:36.391 [信息] 目标：&lt;SSID&gt;（&lt;BSSID&gt;）· 信道 4 · -53 dBm · deauth 帧 34 字节
+22:40:36.392 [信息] 开始 deauth 攻击：… 间隔 200ms（每 3s 报一次进度，Ctrl-C 停止）
+22:40:39.393 [信息] 进行中：已发送 15 帧 · 运行 3s
+22:40:57.393 [信息] 进行中：已发送 105 帧 · 运行 21s
+^C 22:40:58.114 [信息] 已发送 107 帧 · 目标 1 个 · 运行 21s</code></pre>
+        <div class="alert warning">
+          <span class="alert-icon">⚠</span>
+          <div>deauth 一次只打一个 BSSID × 一个频段：目标是 5GHz BSSID 而固件为 2.4GHz 芯片时，程序直接拒绝并说明原因。同名 SSID 的多个 AP 会轮流切信道全部命中。</div>
+        </div>
+        <p>完整说明（注入循环、信号对账、跨平台路径）见 <a href="feature/wifi_deauth.md">wifi_deauth.md</a>。</p>
+      </section>
+
+      <section id="cmd-help">
+        <h2>help · 用法总览<a class="anchor" href="#cmd-help">#</a></h2>
+        <p>裸跑 <code>wifisec</code>（无子命令）或 <code>wifisec help</code> 均输出开发者信息与全部子命令用法。</p>
+      </section>
+
+      <!-- ---------- 固件烧录 ---------- -->
+      <section id="firmware">
+        <h2>固件烧录<a class="anchor" href="#firmware">#</a></h2>
+        <p>固件源码 <a href="https://github.com/ctkqiang/wifisec/blob/main/core/esp/esp.ino"><code>core/esp/esp.ino</code></a>，一份源码经编译期条件分支覆盖 ESP8266 / ESP32 全系。推荐 arduino-cli：</p>
+        <pre><code class="lang-bash">arduino-cli compile \
+  --fqbn esp8266:esp8266:nodemcuv2:baud=115200,xtal=80,eesz=4M2M \
+  --build-path /tmp/esp-build core/esp/esp.ino
+
+arduino-cli upload --fqbn esp8266:esp8266:nodemcuv2 \
+  --input-dir /tmp/esp-build -p /dev/cu.usbserial-XXXX core/esp/esp.ino</code></pre>
+        <div class="alert danger">
+          <span class="alert-icon">⚠</span>
+          <div><strong>板型必须与实际硬件一致。</strong>板型携带晶振参数：选成 40MHz 晶振的板型（如 Arduino Primo）而板子实为 26MHz 时，115200 实际跑成 74880——表现为「串口有数据但不是有效 PONG」。拿不准时以 esptool 连接日志的 <code>Crystal is 26MHz</code> 为准。</div>
+        </div>
+        <p>板型选型表、手动下载模式按键、<code>--no-stub</code> 兜底等完整排错见 <a href="feature/wifi_deauth.md">wifi_deauth.md §5.4-§5.5</a>。</p>
+      </section>
+
+      <!-- ---------- 串口协议 ---------- -->
+      <section id="protocol">
+        <h2>串口协议<a class="anchor" href="#protocol">#</a></h2>
+        <p>主机 ↔ 固件帧格式（小端，双向各一个魔数防方向错乱）：</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>方向</th><th>帧头</th><th>帧格式</th></tr></thead>
+            <tbody>
+              <tr><td>主机 → ESP</td><td><code>0xA5</code></td><td><code>[A5][cmd][len_lo][len_hi][payload]</code></td></tr>
+              <tr><td>ESP → 主机</td><td><code>0x5A</code></td><td><code>[5A][cmd][len_lo][len_hi][payload]</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>命令与回复：</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>cmd</th><th>方向</th><th>含义</th><th>payload</th></tr></thead>
+            <tbody>
+              <tr><td><code>0x00</code></td><td>主机→ESP</td><td>PING 握手</td><td>无</td></tr>
+              <tr><td><code>0x00</code></td><td>ESP→主机</td><td>PONG</td><td>协议版本(1) + 能力位图(1)，bit0 = 5GHz</td></tr>
+              <tr><td><code>0x01</code></td><td>主机→ESP</td><td>扫描</td><td>无</td></tr>
+              <tr><td><code>0x01</code></td><td>ESP→主机</td><td>扫描条目</td><td>bssid(6) + channel(1) + rssi(1) + ssidLen(1) + ssid</td></tr>
+              <tr><td><code>0x02</code></td><td>ESP→主机</td><td>扫描结束</td><td>无</td></tr>
+              <tr><td><code>0x02</code></td><td>主机→ESP</td><td>注入</td><td>信道(1) + 802.11 帧（已剥 radiotap）</td></tr>
+              <tr><td><code>0x04</code></td><td>ESP→主机</td><td>错误</td><td>出错命令(1) + 错误码(1)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="grid-2">
+          <div class="card"><h3>复位时序</h3><p class="muted">打开串口先拉复位：DTR 置低（GPIO0 高）→ RTS 置高（EN 低）100ms → 释放。NodeMCU 自动复位电路把 DTR 接到 GPIO0，驱动默认电平会把芯片锁进 ROM 下载模式（115200 完全静默）。</p></div>
+          <div class="card"><h3>噪声重同步</h3><p class="muted">ESP 上电以 74880 输出启动日志，在 115200 下是随机字节。解析器逐字节丢弃直至帧头 <code>0x5A</code>，残缺帧保留待下一段拼齐。</p></div>
+        </div>
+        <p>设计取舍全表见 <a href="feature/wifi_deauth.md">wifi_deauth.md §5.3</a>。</p>
+      </section>
+
+      <!-- ---------- 排错手册 ---------- -->
+      <section id="troubleshoot">
+        <h2>排错手册<a class="anchor" href="#troubleshoot">#</a></h2>
+        <p>高频错误速查（完整版见 <a href="feature/wifi_deauth.md">wifi_deauth.md §5.5</a> 与 <a href="feature/wifi_serial.md">wifi_serial.md §6</a>）：</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>报错</th><th>原因</th><th>处理</th></tr></thead>
+            <tbody>
+              <tr><td>未发现 USB 串口设备</td><td>充电线冒充数据线 / 驱动未装</td><td>换数据线；装 CH340/CP2102 驱动</td></tr>
+              <tr><td>端口正被 X (PID N) 占用</td><td>Arduino 串口监视器等持有端口</td><td>关闭报错点名的进程</td></tr>
+              <tr><td>串口有数据但不是有效 PONG</td><td><strong>板型晶振选错</strong>（115200 偏成 74880）或固件未烧录</td><td>选对板型重烧；74880 下能看到 PONG 即确诊</td></tr>
+              <tr><td>串口完全无数据</td><td>供电不足 / 锁下载模式 / 端口选错</td><td>直连 USB；确认 LED 心跳</td></tr>
+              <tr><td>未找到目标；仅支持 2.4GHz</td><td>目标是 5/6GHz BSSID</td><td>换 2.4GHz BSSID 或 ESP32-C5</td></tr>
+              <tr><td>擦写阶段 Timed out waiting for packet content</td><td>stub 高速擦写丢包</td><td><code>--no-stub</code> ROM 直写（文档 §5.5 有完整命令）</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ---------- 安全与合规 ---------- -->
+      <section id="compliance">
+        <h2>安全与合规<a class="anchor" href="#compliance">#</a></h2>
+        <div class="alert danger">
+          <span class="alert-icon">⚠</span>
+          <div><strong>中华人民共和国境内法律红线：</strong>《中华人民共和国网络安全法》第二十七条明确禁止从事非法侵入他人网络、干扰他人网络正常功能、窃取网络数据等危害网络安全的活动；对他人无线网络实施 deauth 干扰，可能同时触犯《中华人民共和国刑法》第二百八十五条第三款（提供侵入、非法控制计算机信息系统程序、工具罪）与第二百八十六条（破坏计算机信息系统罪）。本项目仅用于<strong>自有网络或已获书面授权</strong>的安全测试，使用者须自行确认符合所在地法律法规。</div>
+        </div>
+        <p>能力边界（重构过程中刻意保持，不自动增加攻击面）：</p>
+        <ul>
+          <li>仅 deauth 一种帧类型，帧构造收敛在 <code>internal/ieee80211</code> 纯字节编解码层；</li>
+          <li>不加入新的 packet type、credential collection、persistence 或 exploit 能力；</li>
+          <li>固件 payload 上限 512 字节，超长直接拒绝，防缓冲区溢出；</li>
+          <li>运行 <code>list</code> 时不要加 sudo——root 在 GUI 会话之外弹不出定位授权窗。</li>
+        </ul>
+      </section>
+
+      <footer>
+        <span>WifiSec · 哪吒网络安全 · 钟智强 · <a href="https://github.com/ctkqiang/wifisec" target="_blank" rel="noopener">GitHub</a></span>
+        <span>文档由 Arco Design 风格静态站呈现 · 无构建依赖</span>
+      </footer>
+    </main>
+  </div>
+
+  <script src="src/scripts/index.js"></script>
+</body>
+</html>

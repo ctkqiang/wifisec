@@ -1,0 +1,39 @@
+@startuml wifisec-serial-protocol
+' WifiSec 串口协议时序：主机 ↔ ESP8266/ESP32 固件（115200 8N1，小端帧）
+' 帧格式: [0xA5|0x5A][cmd][len_lo][len_hi][payload]
+skinparam defaultFontName "PingFang SC"
+skinparam sequenceArrowColor #165DFF
+skinparam sequenceLifeLineBorderColor #C9CDD4
+skinparam participantBackgroundColor #E8F3FF
+skinparam participantBorderColor #165DFF
+
+participant "宿主机 wifisec" as Host
+participant "ESP 协处理器固件" as ESP
+
+== 打开端口 ==
+Host -> ESP : DTR=0 / RTS=1 (100ms) 复位进入正常运行模式
+note right : 驱动默认 DTR 电平会把\nNodeMCU 锁进下载模式，\n必须先做复位时序
+ESP --> Host : 上电启动日志 (74880 波特, 视为噪声)
+
+== 握手 ==
+Host -> ESP : 0xA5 0x00 0x0000 (PING)
+ESP --> Host : 0x5A 0x00 0x0002 [ver=1][caps] (PONG)
+note right : caps bit0=1 表示支持 5GHz\n(仅 ESP32-C5)
+
+== 扫描 ==
+Host -> ESP : 0xA5 0x01 0x0000 (SCAN)
+ESP -> ESP : WiFi.scanNetworks\n(阻塞 2-3s, LED 常亮)
+loop 每个 AP
+  ESP --> Host : 0x5A 0x01 len [bssid(6)][ch][rssi][ssidLen][ssid]
+end
+ESP --> Host : 0x5A 0x02 0x0000 (SCAN_DONE)
+
+== 注入循环 (每 200ms) ==
+loop 直到 SIGINT
+  Host -> ESP : 0xA5 0x02 len [channel][802.11 deauth 帧]
+  ESP -> ESP : wifi_send_pkt_freedom /\nesp_wifi_80211_tx
+  note right : 无 ACK 回包——每条 ACK\n都占串口带宽，丢确认\n比丢帧更伤帧率
+end
+
+Host -> Host : Ctrl-C 输出统计并关闭端口
+@enduml
