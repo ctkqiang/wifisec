@@ -1,0 +1,14 @@
+# WifiSec 安全策略（security.txt）
+
+# 本项目遵循 RFC 9116 安全信息披露标准。
+# 发现安全漏洞请通过以下渠道报告，勿公开披露直至修复。
+
+Contact: https://github.com/ctkqiang/wifisec/security/advisories/new
+Contact: https://ctkqiang.xin
+Preferred-Languages: zh-CN, en
+Canonical: https://github.com/ctkqiang/wifisec/blob/main/SECURITY.md
+
+# 项目性质说明：
+# 本工具仅用于授权范围内的无线安全评估与教学实验。
+# 在中华人民共和国境内使用须遵守《网络安全法》《刑法》相关规定。
+# 仅限自有网络或已获书面授权的测试环境。

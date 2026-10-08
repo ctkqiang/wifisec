@@ -1,0 +1,36 @@
+# WifiSec
+
+> Go 编写的无线安全测试工具。帧注入跑在 ESP 协处理器上，宿主机零依赖、全平台免 root。
+
+## 概述
+
+WifiSec 是哪吒网络安全（钟智强）开发的 WiFi 安全测试工具，采用 Hexagonal Architecture。帧注入由 ESP8266/ESP32 协处理器完成，宿主机经 USB 串口下发协议帧，macOS/Linux/Windows/Termux 全平台免 root。
+
+## 法律声明
+
+仅限自有或已获书面授权的网络使用。《中华人民共和国网络安全法》第二十七条禁止干扰他人网络正常功能；非法 deauth 干扰可能触犯《刑法》第二百八十五条第三款、第二百八十六条。
+
+## 核心能力
+
+- `wifisec list`：无线接口枚举与周边网络扫描（CoreWLAN / iw / netsh）
+- `wifisec serial`：串口设备发现与 VID:PID 芯片识别
+- `wifisec deauth <ssid|bssid> [串口]`：对目标持续发送 802.11 deauth 帧
+- `wifisec help`：用法总览
+
+## 技术架构
+
+- 语言：Go 1.26+，无 CGO
+- 架构：Hexagonal Architecture，应用层只依赖端口
+- 协处理器：ESP8266 / ESP32 全系（ESP32-C5 支持 5GHz）
+- 串口协议：小端帧格式 `[魔数][cmd][len_lo][len_hi][payload]`
+- 注入原语：`wifi_send_pkt_freedom`（ESP8266）/ `esp_wifi_80211_tx`（ESP32）
+
+## 作者
+
+钟智强 · 哪吒网络安全 · https://ctkqiang.xin · 江西上饶
+
+## 链接
+
+- GitHub: https://github.com/ctkqiang/wifisec
+- 文档站: https://ctkqiang.github.io/wifisec/（或本地 docs/index.html）
+- 许可证: GPL-3.0

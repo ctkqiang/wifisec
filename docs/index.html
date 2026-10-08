@@ -3,8 +3,28 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="WifiSec — ESP 协处理器 WiFi deauth 安全测试工具文档">
-  <title>WifiSec 文档 · ESP 协处理器 WiFi 安全测试工具</title>
+  <meta name="description" content="WifiSec — ESP 协处理器 WiFi 安全测试工具。帧注入跑在 ESP8266/ESP32 上，宿主机零依赖、全平台免 root。哪吒网络安全 · 钟智强。">
+  <meta name="keywords" content="WiFi安全,deauth,ESP8266,ESP32,无线安全,渗透测试,网络安全,哪吒网络安全,钟智强,Go,Hexagonal Architecture">
+  <meta name="author" content="钟智强 · 哪吒网络安全">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://ctkqiang.github.io/wifisec/">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="WifiSec — ESP 协处理器 WiFi 安全测试工具">
+  <meta property="og:description" content="帧注入跑在 ESP8266/ESP32 上，宿主机零依赖、全平台免 root。Go 编写，Hexagonal Architecture。">
+  <meta property="og:url" content="https://ctkqiang.github.io/wifisec/">
+  <meta property="og:image" content="https://raw.githubusercontent.com/ctkqiang/wifisec/main/docs/logo.svg">
+  <meta property="og:locale" content="zh_CN">
+  <meta property="og:site_name" content="WifiSec">
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="WifiSec — ESP 协处理器 WiFi 安全测试工具">
+  <meta name="twitter:description" content="帧注入跑在 ESP8266/ESP32 上，宿主机零依赖、全平台免 root。">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/ctkqiang/wifisec/main/docs/logo.svg">
+
+  <title>WifiSec 文档 · ESP 协处理器 WiFi 安全测试工具 · 哪吒网络安全</title>
   <link rel="icon" type="image/svg+xml" href="logo.svg">
   <link rel="stylesheet" href="src/style/index.css">
 </head>
@@ -314,6 +334,33 @@ arduino-cli upload --fqbn esp8266:esp8266:nodemcuv2 \
     </main>
   </div>
 
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "WifiSec",
+    "description": "ESP 协处理器 WiFi 安全测试工具，帧注入跑在 ESP8266/ESP32 上，宿主机零依赖、全平台免 root。",
+    "applicationCategory": "SecurityApplication",
+    "operatingSystem": "macOS, Linux, Windows, Android (Termux)",
+    "author": {
+      "@type": "Person",
+      "name": "钟智强",
+      "alternateName": "哪吒网络安全",
+      "url": "https://ctkqiang.xin",
+      "address": {
+        "@type": "PostalAddress",
+        "addressLocality": "上饶市",
+        "addressRegion": "江西省",
+        "addressCountry": "CN"
+      }
+    },
+    "url": "https://github.com/ctkqiang/wifisec",
+    "downloadUrl": "https://github.com/ctkqiang/wifisec/releases",
+    "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+    "programmingLanguage": "Go",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" }
+  }
+  </script>
   <script src="src/scripts/index.js"></script>
 </body>
 </html>
