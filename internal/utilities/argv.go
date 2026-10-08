@@ -18,8 +18,6 @@ func ArgumentsHandler() {
 	var command model.Command
 
 	if len(os.Args) < 2 {
-		// 未输入子命令时默认展示帮助，而非直接报错退出，
-		// 降低新用户首次运行的心智门槛。
 		command = model.Command{Name: "help"}
 	} else {
 		command = model.Command{
