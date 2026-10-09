@@ -208,7 +208,12 @@ gh release download --repo ctkqiang/wifisec --pattern 'wifisec-linux-amd64'   # 
 go install github.com/ctkqiang/wifisec/cmd/wifisec@latest
 ```
 
-> `go install` 取包路径最后一段作为二进制名（`cmd/wifisec` → `wifisec`）。默认安装到 `$(go env GOPATH)/bin/`（macOS/Linux/Termux 通常为 `~/go/bin/`），首次安装后记得把这个目录放进 `PATH`。
+> `go install` 取包路径最后一段作为二进制名（`cmd/wifisec` → `wifisec`）。二进制默认写入 `$(go env GOPATH)/bin/`（macOS/Linux/Termux 通常为 `~/go/bin/`）。若安装后提示 `command not found`，是该目录不在 `PATH` 中，一次性追加即可：
+>
+> ```bash
+> echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.bashrc   # Termux/bash；zsh 用户写 ~/.zshrc
+> source ~/.bashrc
+> ```
 
 ## 编译与运行
 

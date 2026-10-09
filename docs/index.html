@@ -185,7 +185,10 @@
         </div>
         <div class="alert info">
           <span class="alert-icon">ⓘ</span>
-          <div><code>go install</code> 安装到 <code>$(go env GOPATH)/bin/</code>，首次使用记得把该目录加进 <code>PATH</code>。二进制名取包路径最后一段，装好即是 <code>wifisec</code>。</div>
+          <div><code>go install</code> 安装到 <code>$(go env GOPATH)/bin/</code>（通常 <code>~/go/bin/</code>）。若安装后提示 <code>command not found</code>，是该目录不在 <code>PATH</code> 中，追加并重载即可：
+            <pre><code class="lang-bash">echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.bashrc   <span class="cmt"># Termux/bash；zsh 用户写 ~/.zshrc</span>
+source ~/.bashrc</code></pre>
+            二进制名取包路径最后一段，装好即是 <code>wifisec</code>。</div>
         </div>
         <ol class="steps">
           <li><span class="step-dot">1</span><strong>编译</strong>依赖 Go 1.26+，无 CGO：<pre><code class="lang-bash">make build   <span class="cmt"># 产物 build/wifisec（macOS 额外产出 .app bundle 供定位授权）</span></code></pre></li>
