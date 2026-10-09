@@ -122,6 +122,7 @@ func openAssociator(portName, target string, targetMAC net.HardwareAddr) (associ
 		if err != nil {
 			return nil, "", "", nil, err
 		}
+
 		utilities.Info("协处理器就绪（协议 v%d），扫描周边网络定位目标…", injector.FirmwareVersion())
 		scanned, err := injector.Scan()
 		if err != nil {
