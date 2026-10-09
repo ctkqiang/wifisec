@@ -143,22 +143,41 @@
   // ---------- 移动端抽屉 ----------
   var sidebar = document.getElementById('sidebar');
   var menuToggle = document.getElementById('menuToggle');
+  var backdrop = document.getElementById('sidebarBackdrop');
+
+  function closeSidebar() {
+    sidebar.classList.remove('open');
+    if (backdrop) backdrop.classList.remove('show');
+  }
+
+  function openSidebar() {
+    sidebar.classList.add('open');
+    if (backdrop) backdrop.classList.add('show');
+  }
 
   if (menuToggle && sidebar) {
     menuToggle.addEventListener('click', function (e) {
       e.stopPropagation();
-      sidebar.classList.toggle('open');
-    });
-
-    // 点正文任意处收起抽屉；导航跳转后也收起
-    document.addEventListener('click', function (e) {
-      if (sidebar.classList.contains('open') && !sidebar.contains(e.target)) {
-        sidebar.classList.remove('open');
+      if (sidebar.classList.contains('open')) {
+        closeSidebar();
+      } else {
+        openSidebar();
       }
     });
 
+    // 点遮罩或正文任意处收起抽屉
+    if (backdrop) {
+      backdrop.addEventListener('click', closeSidebar);
+    }
+    document.addEventListener('click', function (e) {
+      if (sidebar.classList.contains('open') && !sidebar.contains(e.target) && e.target !== menuToggle) {
+        closeSidebar();
+      }
+    });
+
+    // 导航跳转后收起
     navLinks.forEach(function (a) {
-      a.addEventListener('click', function () { sidebar.classList.remove('open'); });
+      a.addEventListener('click', closeSidebar);
     });
   }
 })();
