@@ -6,6 +6,11 @@ MAIN_PATH := ./cmd/wifisec
 BUILD_PATH := build
 APP_NAME := wifisec
 
+# 版本号取 git 描述（tag 优先），经 ldflags 注入 constants.BuildVersion，
+# 使 make build 的产物在 help 输出中携带真实版本；无 git 环境回落 dev
+VERSION := $(shell git describe --tags --always 2>/dev/null || echo dev)
+LDFLAGS := -X github.com/ctkqiang/wifisec/internal/constants.BuildVersion=$(VERSION)
+
 run:
 	@echo "正在运行应用..."
 	go run -race $(MAIN_PATH)
@@ -19,14 +24,14 @@ ifeq ($(shell uname -s),Darwin)
 # 另建同名符号链接，保留 ./build/wifisec list 的 CLI 使用习惯。
 	@rm -rf $(BUILD_PATH)/$(APP_NAME) $(BUILD_PATH)/$(APP_NAME).app
 	@mkdir -p $(BUILD_PATH)/$(APP_NAME).app/Contents/MacOS
-	@go build -o $(BUILD_PATH)/$(APP_NAME).app/Contents/MacOS/$(APP_NAME) $(MAIN_PATH)
+	@go build -ldflags "$(LDFLAGS)" -o $(BUILD_PATH)/$(APP_NAME).app/Contents/MacOS/$(APP_NAME) $(MAIN_PATH)
 	@cp internal/platform/darwin/Info.plist $(BUILD_PATH)/$(APP_NAME).app/Contents/Info.plist
 	@codesign --sign - --force $(BUILD_PATH)/$(APP_NAME).app \
 		&& echo "已完成 macOS ad-hoc 签名（首次运行的定位授权弹窗依赖此签名）" \
 		|| echo "警告：codesign 失败，请确认已安装 Xcode Command Line Tools；未签名时 BSSID 授权弹窗可能无法弹出"
 	@ln -s $(APP_NAME).app/Contents/MacOS/$(APP_NAME) $(BUILD_PATH)/$(APP_NAME)
 else
-	@go build -o $(BUILD_PATH)/$(APP_NAME) $(MAIN_PATH)
+	@go build -ldflags "$(LDFLAGS)" -o $(BUILD_PATH)/$(APP_NAME) $(MAIN_PATH)
 endif
 
 clean:
