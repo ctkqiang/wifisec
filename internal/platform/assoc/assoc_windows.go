@@ -12,7 +12,7 @@ import (
 
 // Native 是 Windows 本机网卡关联器，经 netsh 临时无线配置尝试关联。
 type Native struct {
-	profilePath string
+	profilePath, lastBSSID string
 }
 
 // profileName 是爆破用的临时配置名。固定名字而非 SSID，避免误删用户已有配置。
@@ -45,10 +45,29 @@ func (n *Native) Associate(ssid, password string) (bool, error) {
 		time.Sleep(time.Second)
 		out, _ := exec.Command("netsh", "wlan", "show", "interfaces").Output()
 		if associatedWith(string(out), ssid) {
+			// 在 defer 删除配置断连之前，从同一份输出里缓存 BSSID。
+			n.lastBSSID = parseBSSID(string(out))
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// ConnectedBSSID 返回最近一次成功关联时记录的 BSSID；查不到为空串。
+func (n *Native) ConnectedBSSID(string) string {
+	return n.lastBSSID
+}
+
+// parseBSSID 从 netsh wlan show interfaces 输出取 BSSID 字段值。
+func parseBSSID(out string) string {
+	for line := range strings.Lines(out) {
+		trimmed := strings.TrimSpace(line)
+		rest, ok := strings.CutPrefix(trimmed, "BSSID")
+		if ok {
+			return strings.TrimLeft(rest, " \t:")
+		}
+	}
+	return ""
 }
 
 // associatedWith 判定接口状态输出中目标 SSID 已连接。

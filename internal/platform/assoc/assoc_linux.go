@@ -12,7 +12,7 @@ import (
 
 // Native 是 Linux 本机网卡关联器，经 NetworkManager（nmcli）尝试关联。
 type Native struct {
-	iface string
+	iface, lastBSSID string
 }
 
 // profileName 是爆破用的临时连接配置名。固定名字而非 SSID：
@@ -58,5 +58,32 @@ func (n *Native) Associate(ssid, password string) (bool, error) {
 	if err != nil {
 		return false, nil
 	}
-	return bytes.Contains(out, []byte("successfully activated")), nil
+	if !bytes.Contains(out, []byte("successfully activated")) {
+		return false, nil
+	}
+	// 必须在 defer 删除配置断连之前缓存 BSSID。
+	n.lastBSSID = n.queryActiveBSSID()
+	return true, nil
+}
+
+// ConnectedBSSID 返回最近一次成功关联时记录的 BSSID；查不到为空串。
+func (n *Native) ConnectedBSSID(string) string {
+	return n.lastBSSID
+}
+
+// queryActiveBSSID 取当前激活连接的 BSSID。nmcli -t 模式把 BSSID 内的
+// 冒号转义为 \:（防与字段分隔符混淆），解析后需还原。
+func (n *Native) queryActiveBSSID() string {
+	out, err := exec.Command("nmcli", "-t", "-f", "ACTIVE,BSSID", "dev", "wifi", "list").Output()
+	if err != nil {
+		return ""
+	}
+	for line := range strings.SplitSeq(string(out), "\n") {
+		rest, ok := strings.CutPrefix(line, "yes:")
+		if !ok {
+			continue
+		}
+		return strings.ReplaceAll(rest, `\:`, ":")
+	}
+	return ""
 }
