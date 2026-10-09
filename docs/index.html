@@ -69,6 +69,7 @@
           <a href="#cmd-list">list · 无线扫描</a>
           <a href="#cmd-serial">serial · 串口发现</a>
           <a href="#cmd-deauth">deauth · 帧注入</a>
+          <a href="#cmd-brute">brute · 密码爆破</a>
           <a href="#cmd-help">help · 用法总览</a>
         </div>
         <div class="nav-group">
@@ -196,7 +197,8 @@ source ~/.bashrc</code></pre>
           <li><span class="step-dot">3</span><strong>确认串口</strong><pre><code class="lang-bash">wifisec serial   <span class="cmt"># USB 设备置顶，记下端口名与 VID:PID</span></code></pre></li>
           <li><span class="step-dot">4</span><strong>扫描与打击</strong><pre><code class="lang-bash">wifisec list                            <span class="cmt"># 周边网络（主机射频视野）</span>
 wifisec deauth <span class="str">'MyWiFi'</span>                <span class="cmt"># 按 SSID，同名多 AP 全部命中</span>
-wifisec deauth 01:23:45:67:89:ab        <span class="cmt"># 按 BSSID 精确锁定</span></code></pre></li>
+wifisec deauth 01:23:45:67:89:ab        <span class="cmt"># 按 BSSID 精确锁定</span>
+wifisec brute <span class="str">'MyWiFi'</span> with-pass: pass.txt <span class="cmt"># 在线字典爆破，命中即停</span></code></pre></li>
         </ol>
       </section>
 
@@ -242,6 +244,19 @@ wifisec deauth 01:23:45:67:89:ab        <span class="cmt"># 按 BSSID 精确锁�
           <div>deauth 一次只打一个 BSSID × 一个频段：目标是 5GHz BSSID 而固件为 2.4GHz 芯片时，程序直接拒绝并说明原因。同名 SSID 的多个 AP 会轮流切信道全部命中。</div>
         </div>
         <p>完整说明（注入循环、信号对账、跨平台路径）见 <a href="feature/wifi_deauth.md">wifi_deauth.md</a>。</p>
+      </section>
+
+      <section id="cmd-brute">
+        <h2>brute · 密码爆破<a class="anchor" href="#cmd-brute">#</a></h2>
+        <p>在线密码字典爆破：把字典里的每个密码交给协处理器执行一次 <code>WiFi.begin</code> 关联尝试，固件回报成功/失败，命中即停。仅走 ESP 路径，全程免 root。</p>
+        <pre><code class="lang-bash">wifisec brute <span class="str">'MyWiFi'</span> with-pass: pass.txt              <span class="cmt"># 按 SSID</span>
+wifisec brute 01:23:45:67:89:ab pass.txt /dev/cu.usbserial-XXXX  <span class="cmt"># 按 BSSID，手动指定串口</span></code></pre>
+        <p>字典格式：每行一个密码，<code>#</code> 开头为注释，空行自动跳过。</p>
+        <div class="alert warning">
+          <span class="alert-icon">⚠</span>
+          <div>在线破解的固有代价：每次尝试约 2-5 秒（AP 拒绝应答的时间），且现代 AP 常在数次失败后限速或临时锁定。大字典请有心理准备；WPA3（SAE）成功率低于 WPA2。</div>
+        </div>
+        <p>需要先烧录含关联命令的固件（协议含 <code>CMD_ASSOC 0x03</code>）。完整说明（协议载荷、限速对抗、与离线破解的区别）见 <a href="feature/wifi_brute_force.md">wifi_brute_force.md</a>。</p>
       </section>
 
       <section id="cmd-help">
@@ -290,6 +305,8 @@ arduino-cli upload --fqbn esp8266:esp8266:nodemcuv2 \
               <tr><td><code>0x01</code></td><td>ESP→主机</td><td>扫描条目</td><td>bssid(6) + channel(1) + rssi(1) + ssidLen(1) + ssid</td></tr>
               <tr><td><code>0x02</code></td><td>ESP→主机</td><td>扫描结束</td><td>无</td></tr>
               <tr><td><code>0x02</code></td><td>主机→ESP</td><td>注入</td><td>信道(1) + 802.11 帧（已剥 radiotap）</td></tr>
+              <tr><td><code>0x03</code></td><td>主机→ESP</td><td>关联尝试</td><td>ssidLen(1) + ssid + passLen(1) + password</td></tr>
+              <tr><td><code>0x03</code></td><td>ESP→主机</td><td>关联结果</td><td>result(1)：0 = 失败/超时，1 = 成功</td></tr>
               <tr><td><code>0x04</code></td><td>ESP→主机</td><td>错误</td><td>出错命令(1) + 错误码(1)</td></tr>
             </tbody>
           </table>

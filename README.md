@@ -95,7 +95,7 @@ WifiSec 是 Go 编写的无线安全测试工具，采用 Hexagonal Architecture
 
 ```mermaid
 flowchart TB
-    CLI["cmd/wifisec/main.go<br/>命令路由: list / serial / deauth / help"] --> APP["internal/functions<br/>应用编排: deauther · lists · serial"]
+    CLI["cmd/wifisec/main.go<br/>命令路由: list / serial / deauth / brute / help"] --> APP["internal/functions<br/>应用编排: deauther · brute · lists · serial"]
     APP -->|"端口: frameWriter<br/>channelSetter"| ESP["internal/platform/esp<br/>串口帧协议 · 复位时序 · 噪声重同步"]
     APP -->|"端口: 无线扫描"| DAR["darwin · CoreWLAN"]
     APP --> LIN["linux · iw + AF_PACKET<br/>termux · Android API"]
@@ -115,6 +115,7 @@ flowchart TB
 wifisec list                              # 列出无线接口与周边网络
 wifisec serial                            # 列出 USB 串口设备（协处理器入口排查）
 wifisec deauth <ssid|bssid> [串口]        # 对目标持续发送 deauth 帧，Ctrl-C 停止
+wifisec brute <ssid|bssid> with-pass: <字典> [串口]   # 在线密码字典爆破，命中即停
 wifisec help                              # 用法总览
 ```
 
@@ -123,6 +124,7 @@ wifisec help                              # 用法总览
 | `list`    | 无线接口枚举与周边网络扫描 | [wifi_list.md](docs/feature/wifi_list.md)                |
 | `serial`  | 串口设备发现与 VID:PID 判读 | [wifi_serial.md](docs/feature/wifi_serial.md)            |
 | `deauth`  | 802.11 deauthentication 帧注入 | [wifi_deauth.md](docs/feature/wifi_deauth.md)        |
+| `brute`   | 在线密码字典爆破（协处理器逐密码关联尝试） | [wifi_brute_force.md](docs/feature/wifi_brute_force.md) |
 | 文档站    | HTML/JS/CSS 静态文档        | [docs/index.html](docs/index.html)（Arco Design 风格）   |
 
 ---
@@ -144,6 +146,8 @@ wifisec help                              # 用法总览
 | `0x01`       | ESP→主机  | 扫描条目 | bssid(6) + channel(1) + rssi(1) + ssidLen(1) + ssid |
 | `0x02`       | ESP→主机  | 扫描结束 | 无                                               |
 | `0x02`       | 主机→ESP  | 注入     | 信道(1) + 802.11 帧（已剥 radiotap）              |
+| `0x03`       | 主机→ESP  | 关联尝试 | ssidLen(1) + ssid + passLen(1) + password         |
+| `0x03`       | ESP→主机  | 关联结果 | result(1)：0 = 密码错误/超时，1 = 关联成功        |
 | `0x04`       | ESP→主机  | 错误     | 出错命令(1) + 错误码(1)                           |
 
 两个关键设计：
@@ -157,11 +161,11 @@ wifisec help                              # 用法总览
 
 ```
 wifisec/
-├── cmd/wifisec/main.go                  # 入口：命令注册与路由（list/serial/deauth/help）
+├── cmd/wifisec/main.go                  # 入口：命令注册与路由（list/serial/deauth/brute/help）
 ├── core/esp/esp.ino                     # 协处理器固件（ESP8266/ESP32 全系，编译期条件分支）
 ├── internal/
 │   ├── constants/                       # 开发者元数据等常量
-│   ├── functions/                       # 应用编排：deauther · lists · serial · help
+│   ├── functions/                       # 应用编排：deauther · connect(brute) · lists · serial · help
 │   ├── ieee80211/frame.go               # deauth 帧纯字节编解码（与介质解耦，可独立单测）
 │   ├── model/                           # wifi / command / author 领域模型
 │   ├── platform/
@@ -179,7 +183,7 @@ wifisec/
 │   ├── logo.svg                         # 项目 Logo
 │   ├── src/style/ · src/scripts/        # 文档站样式（SCSS 源 + 编译产物）与交互脚本
 │   ├── diagram/                         # PlantUML：执行流程 + 串口协议时序
-│   └── feature/                         # wifi_list / wifi_serial / wifi_deauth 详细文档
+│   └── feature/                         # wifi_list / wifi_serial / wifi_deauth / wifi_brute_force 详细文档
 ├── Makefile                             # build / list / test / 等构建编排
 └── .githooks/                           # Conventional Commits 提交信息校验钩子
 ```
