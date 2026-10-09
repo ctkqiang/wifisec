@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="WifiSec — ESP 协处理器 WiFi 安全测试工具。帧注入跑在 ESP8266/ESP32 上，宿主机零依赖、全平台免 root。哪吒网络安全 · 钟智强。">
-  <meta name="keywords" content="WiFi安全,deauth,ESP8266,ESP32,无线安全,渗透测试,网络安全,哪吒网络安全,钟智强,Go,Hexagonal Architecture">
+  <meta name="description" content="WifiSec — ESP 协处理器 WiFi 安全测试工具。deauth 帧注入与在线密码爆破跑在 ESP8266/ESP32 上，宿主机零依赖、全平台免 root；无设备时爆破自动回落本机网卡，命中即停输出 SSID/BSSID/密码凭证。哪吒网络安全 · 钟智强。">
+  <meta name="keywords" content="WiFi安全,deauth,ESP8266,ESP32,无线安全,渗透测试,网络安全,密码爆破,WiFi brute force,WPA2,无线渗透测试,802.11帧注入,Termux WiFi,免root,红队工具,哪吒网络安全,钟智强,Go,Hexagonal Architecture">
   <meta name="author" content="钟智强 · 哪吒网络安全">
   <meta name="robots" content="index, follow">
   <link rel="canonical" href="https://ctkqiang.github.io/wifisec/">
@@ -134,6 +134,10 @@
             <img src="img/dev-corewlan-scan.jpg" alt="corewlan_darwin.m 代码与 wifisec list 扫描结果" loading="lazy">
             <figcaption>CoreWLAN 扫描封装 · <code>wifisec list</code> 输出</figcaption>
           </figure>
+          <figure class="screenshot" style="grid-column: 1 / -1;">
+            <img src="img/dev-brute-verbose.jpg" alt="connect.go 代码与 wifisec brute 逐次尝试带耗时的终端输出" loading="lazy">
+            <figcaption>爆破编排 · <code>wifisec brute</code> 逐次尝试带耗时，命中即停输出凭证块</figcaption>
+          </figure>
         </div>
       </section>
 
@@ -248,15 +252,24 @@ wifisec brute <span class="str">'MyWiFi'</span> with-pass: pass.txt <span class=
 
       <section id="cmd-brute">
         <h2>brute · 密码爆破<a class="anchor" href="#cmd-brute">#</a></h2>
-        <p>在线密码字典爆破：把字典里的每个密码交给协处理器执行一次 <code>WiFi.begin</code> 关联尝试，固件回报成功/失败，命中即停。仅走 ESP 路径，全程免 root。</p>
+        <p>在线密码字典爆破：把字典里的每个密码执行一次真实关联尝试，由 AP 亲自判定对错。插入 ESP 开发板时走协处理器（关联跑在板载射频上，不碰本机网络配置）；未检测到设备时自动回落本机网卡（macOS <code>networksetup</code> / Linux <code>nmcli</code> / Windows <code>netsh</code>）。</p>
         <pre><code class="lang-bash">wifisec brute <span class="str">'MyWiFi'</span> with-pass: pass.txt              <span class="cmt"># 按 SSID</span>
 wifisec brute 01:23:45:67:89:ab pass.txt /dev/cu.usbserial-XXXX  <span class="cmt"># 按 BSSID，手动指定串口</span></code></pre>
-        <p>字典格式：每行一个密码，<code>#</code> 开头为注释，空行自动跳过。</p>
+        <p>字典格式：每行一个密码，<code>#</code> 开头为注释，空行自动跳过。每次尝试带耗时逐条输出，<strong>命中即停</strong>并打印完整凭证块：</p>
+        <pre><code class="lang-text">[信息] [1/4] 失败："123456"（14.3s）
+[信息] [2/4] 失败："password"（15.4s）
+
+════════════ 爆破成功 ════════════
+  SSID   : MyWiFi
+  BSSID  : aa:bb:cc:dd:ee:ff
+  密码   : correcthorse
+  尝试   : 3/4 · 总耗时 41s
+═══════════════════════════════════</code></pre>
         <div class="alert warning">
           <span class="alert-icon">⚠</span>
           <div>在线破解的固有代价：每次尝试约 2-5 秒（AP 拒绝应答的时间），且现代 AP 常在数次失败后限速或临时锁定。大字典请有心理准备；WPA3（SAE）成功率低于 WPA2。</div>
         </div>
-        <p>需要先烧录含关联命令的固件（协议含 <code>CMD_ASSOC 0x03</code>）。完整说明（协议载荷、限速对抗、与离线破解的区别）见 <a href="feature/wifi_brute_force.md">wifi_brute_force.md</a>。</p>
+        <p>macOS 本机路径采用两段式判定：<code>networksetup</code> 返回 0 仅代表 join 请求被受理，还需轮询确认接口真实接入目标 SSID，杜绝假命中。ESP 路径需先烧录含关联命令的固件（协议含 <code>CMD_ASSOC 0x03</code>）。完整说明（协议载荷、BSSID 来源分级、限速对抗、与离线破解的区别）见 <a href="feature/wifi_brute_force.md">wifi_brute_force.md</a>。</p>
       </section>
 
       <section id="cmd-help">

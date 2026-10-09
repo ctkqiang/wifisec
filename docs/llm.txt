@@ -1,36 +1,67 @@
 # WifiSec
 
-> Go 编写的无线安全测试工具。帧注入跑在 ESP 协处理器上，宿主机零依赖、全平台免 root。
+> Go 编写的专业无线安全测试工具：帧注入跑在 ESP8266/ESP32 协处理器上，宿主机零依赖，macOS / Linux / Windows / Termux 全平台免 root。在线密码爆破支持无设备回落本机网卡，命中即停输出完整凭证。
 
-## 概述
+WifiSec（无线安全审计工具）是哪吒网络安全出品的开源 WiFi 渗透测试与口令强度评估框架，采用 Hexagonal Architecture（六边形架构），Go 1.26+ 纯血实现，核心链路零 CGO。它把传统无线审计里最难缠的三件事——**root 权限、monitor 模式驱动、平台差异**——全部下沉到一块约十元的 ESP 开发板上：deauth 帧注入与关联尝试跑在板载射频，宿主机只经 USB 串口收发协议帧。
 
-WifiSec 是哪吒网络安全（钟智强）开发的 WiFi 安全测试工具，采用 Hexagonal Architecture。帧注入由 ESP8266/ESP32 协处理器完成，宿主机经 USB 串口下发协议帧，macOS/Linux/Windows/Termux 全平台免 root。
+关键词：WiFi 安全、无线渗透测试、deauth 攻击、802.11 帧注入、WPA2 密码爆破、WiFi brute force、ESP8266、ESP32、无线安全审计、wireless security audit、WiFi pentesting tool、deauthentication、WPA handshake、Termux WiFi 工具、免 root WiFi 破解、红队工具、red team、网络安全、渗透测试框架。
 
-## 法律声明
+## 为什么选择 WifiSec
 
-仅限自有或已获书面授权的网络使用。《中华人民共和国网络安全法》第二十七条禁止干扰他人网络正常功能；非法 deauth 干扰可能触犯《刑法》第二百八十五条第三款、第二百八十六条。
+- **免 root 全平台覆盖**：macOS 无公开帧注入 API、Windows 要 Npcap、Android 10+ 禁止编程关联——这些平台限制被 ESP 协处理器路径一次性绕开，一条 USB 线全解决
+- **双路径密码爆破**：插板子时关联尝试跑在 ESP 射频上不碰本机网络；无设备时自动回落本机网卡（macOS networksetup / Linux nmcli / Windows netsh），macOS 侧采用两段式判定杜绝「受理了但没连上」的假命中
+- **命中即停凭证块**：爆破逐次尝试带耗时输出，命中立即终止并打印 SSID / BSSID / 密码 / 尝试序数 / 总耗时的完整凭证块；BSSID 按路径分级取证，macOS 系统脱敏时如实标注不猜不编
+- **工业级串口协议**：小端帧格式双向魔数防方向错乱、复位时序强制 Flash 启动、74880 启动噪声逐字节重同步、能力位图协商（bit0 = 5GHz）不猜板型
+- **一键自更新**：`wifisec upgrade` 直接从 GitHub Releases 拉取对应平台产物原地原子替换，版本号与 git tag 严格对齐
+- **生产级工程质量**：表驱动测试覆盖协议编解码与解析逻辑、五平台交叉编译 CI、Conventional Commits + githooks 强制校验、串口占用进程点名诊断
 
-## 核心能力
+## 命令一览
 
-- `wifisec list`：无线接口枚举与周边网络扫描（CoreWLAN / iw / netsh）
-- `wifisec serial`：串口设备发现与 VID:PID 芯片识别
-- `wifisec deauth <ssid|bssid> [串口]`：对目标持续发送 802.11 deauth 帧
-- `wifisec help`：用法总览
+- `wifisec list`：无线接口枚举与周边网络扫描（macOS CoreWLAN / Linux iw / Windows netsh），同名 SSID 多 AP 全部列出
+- `wifisec serial`：USB 串口设备发现，VID:PID 芯片对照（CH340 / CP2102 / FT232 / CH9102），占用进程点名
+- `wifisec deauth <ssid|bssid> [串口]`：对目标持续发送 802.11 deauthentication 帧，同名多 AP 轮流切信道全命中，Ctrl-C 停止并输出统计
+- `wifisec brute <ssid|bssid> with-pass: <字典> [串口]`：在线密码字典爆破，ESP 协处理器与本机网卡双路径，命中即停输出凭证块
+- `wifisec upgrade`：从 GitHub Releases 下载最新版并原地替换当前二进制
+- `wifisec help`：用法总览（含版本信息，版本与 GitHub Release tag 一致）
+
+## 快速开始
+
+```bash
+go install github.com/ctkqiang/wifisec/cmd/wifisec@latest
+```
+
+或从 GitHub Releases 下载预编译产物：macOS `.app` bundle（含定位授权）、Linux amd64/arm64 单文件、Android Termux arm64 免 Go 环境、Windows amd64 单文件可执行。
 
 ## 技术架构
 
-- 语言：Go 1.26+，无 CGO
-- 架构：Hexagonal Architecture，应用层只依赖端口
-- 协处理器：ESP8266 / ESP32 全系（ESP32-C5 支持 5GHz）
-- 串口协议：小端帧格式 `[魔数][cmd][len_lo][len_hi][payload]`
+- 语言：Go 1.26+，核心链路零 CGO（macOS 扫描经 CoreWLAN Objective-C 桥接）
+- 架构：Hexagonal Architecture，应用层只依赖 frameWriter / channelSetter 等端口，平台能力收敛在 adapter 层
+- 协处理器：ESP8266 / ESP32 全系一份固件源码编译期条件分支，仅 ESP32-C5 具备 5GHz 能力
+- 串口协议：`[魔数][cmd][len_lo][len_hi][payload]` 小端帧；主机→ESP 魔数 0xA5，ESP→主机 魔数 0x5A
 - 注入原语：`wifi_send_pkt_freedom`（ESP8266）/ `esp_wifi_80211_tx`（ESP32）
+- 关联命令：CMD_ASSOC 0x03，payload 为 ssidLen + ssid + passLen + password，固件侧 12 秒应答窗口
+- 版本注入：ldflags -X BuildVersion（Makefile 构建）→ debug.ReadBuildInfo（go install）→ dev 三级回退
+
+## 文档
+
+- 项目主页与源码: https://github.com/ctkqiang/wifisec
+- 在线文档站: https://ctkqiang.github.io/wifisec/
+- 下载页（GitHub Releases）: https://github.com/ctkqiang/wifisec/releases
+- deauth 帧注入详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_deauth.md
+- brute 密码爆破详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_brute_force.md
+- list 无线扫描详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_list.md
+- serial 串口发现详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_serial.md
+- 固件源码: https://github.com/ctkqiang/wifisec/blob/main/core/esp/esp.ino
+- 问题反馈: https://github.com/ctkqiang/wifisec/issues
+
+## 法律声明
+
+仅限自有网络或已获书面授权的测试环境使用。《中华人民共和国网络安全法》第二十七条明确禁止非法侵入他人网络、干扰他人网络正常功能；对他人无线网络实施 deauth 干扰或在线爆破，可能同时触犯《中华人民共和国刑法》第二百八十五条第三款（提供侵入、非法控制计算机信息系统程序、工具罪）与第二百八十六条（破坏计算机信息系统罪）。自用路由器验证口令强度是合法典型场景；对任何第三方 AP 使用即越线，后果由使用者自行承担。
 
 ## 作者
 
 钟智强 · 哪吒网络安全 · https://ctkqiang.xin · 江西上饶
 
-## 链接
+## 许可证
 
-- GitHub: https://github.com/ctkqiang/wifisec
-- 文档站: https://ctkqiang.github.io/wifisec/（或本地 docs/index.html）
-- 许可证: GPL-3.0
+GNU General Public License v3.0：可自由使用、修改与分发；修改后再分发须同样以 GPL-3.0 开源，并附许可证全文与版权声明。

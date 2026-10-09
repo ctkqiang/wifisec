@@ -72,6 +72,14 @@ WifiSec 是 Go 编写的无线安全测试工具，采用 Hexagonal Architecture
   <sub>左：串口设备枚举代码与 `wifisec serial` 输出 · 右：CoreWLAN 扫描封装与 `wifisec list` 输出</sub>
 </p>
 
+<p align="center">
+  <img src="docs/img/dev-brute-verbose.jpg" alt="connect.go 爆破编排代码与 wifisec brute 终端输出" width="98%">
+</p>
+
+<p align="center">
+  <sub><code>wifisec brute</code> 在线爆破：逐次尝试带耗时，命中即停并输出 SSID/BSSID/密码凭证块（macOS 本机网卡路径）</sub>
+</p>
+
 ---
 
 ## 工作方式
@@ -124,7 +132,7 @@ wifisec help                              # 用法总览
 | `list`    | 无线接口枚举与周边网络扫描 | [wifi_list.md](docs/feature/wifi_list.md)                |
 | `serial`  | 串口设备发现与 VID:PID 判读 | [wifi_serial.md](docs/feature/wifi_serial.md)            |
 | `deauth`  | 802.11 deauthentication 帧注入 | [wifi_deauth.md](docs/feature/wifi_deauth.md)        |
-| `brute`   | 在线密码字典爆破（ESP 协处理器；无设备时回落本机网卡） | [wifi_brute_force.md](docs/feature/wifi_brute_force.md) |
+| `brute`   | 在线密码字典爆破，命中即停并输出 SSID/BSSID/密码凭证块（ESP 协处理器；无设备时回落本机网卡） | [wifi_brute_force.md](docs/feature/wifi_brute_force.md) |
 | 文档站    | HTML/JS/CSS 静态文档        | [docs/index.html](docs/index.html)（Arco Design 风格）   |
 
 ---
