@@ -1,13 +1,14 @@
 package main
 
 import (
+	"os"
+	"os/signal"
+	"syscall"
+
 	"github.com/ctkqiang/wifisec/internal/constants"
 	"github.com/ctkqiang/wifisec/internal/functions"
 	platformdarwin "github.com/ctkqiang/wifisec/internal/platform/darwin"
 	"github.com/ctkqiang/wifisec/internal/utilities"
-	"os"
-	"os/signal"
-	"syscall"
 )
 
 var (
@@ -16,6 +17,7 @@ var (
 		"deauth": functions.WifiDeauther,
 		"list":   functions.WifiList,
 		"serial": functions.Serial,
+		"brute":  functions.BruteForceConnectToWiFi,
 		"help":   functions.HelpUsage,
 	}
 )
