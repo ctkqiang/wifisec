@@ -21,6 +21,7 @@ var helpUsageLines = []string{
 	"  serial                      列出 USB 串口设备（确认协处理器端口与 VID:PID）",
 	"  deauth <ssid|bssid> [串口]  对目标持续发送 deauth 帧，Ctrl-C 停止并输出统计",
 	"  brute <ssid|bssid> with-pass: <字典> [串口]  在线密码字典爆破，命中即停",
+	"  upgrade                     从 GitHub Releases 下载最新版并原地替换当前二进制",
 	"  help                        显示本帮助",
 	"",
 	"示例:",
