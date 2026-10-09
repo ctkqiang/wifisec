@@ -4,6 +4,14 @@
 
 固件与协处理器架构见 [wifi_deauth.md](wifi_deauth.md)；本文只覆盖主机侧的串口发现与排错。
 
+## 获取二进制
+
+```bash
+go install github.com/ctkqiang/wifisec/cmd/wifisec@latest
+```
+
+其他获取方式（Release 下载、源码编译）见仓库 README。
+
 ## 1. 功能定位
 
 协处理器模式下，`deauth` 的射频工作在 ESP 板子上，宿主机只通过 USB 串口发协议帧。因此每次开打前必须回答三个问题：

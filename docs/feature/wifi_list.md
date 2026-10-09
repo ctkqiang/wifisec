@@ -6,6 +6,14 @@
 
 实现位于 `internal/functions/lists.go`，命令入口为 `functions.WifiList`，经 `cmd/wifisec/main.go` 的命令注册表分发。
 
+## 获取二进制
+
+```bash
+go install github.com/ctkqiang/wifisec/cmd/wifisec@latest
+```
+
+其他获取方式（Release 下载、源码编译）见仓库 README。
+
 ## 使用方式
 
 ### 全量扫描

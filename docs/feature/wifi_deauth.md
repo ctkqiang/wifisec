@@ -2,6 +2,7 @@
 
 ## 目录
 
+- [获取二进制](#获取二进制)
 - [1. 功能概述](#1-功能概述)
 - [2. 802.11 协议原理](#2-80211-协议原理)
 - [3. 帧结构设计](#3-帧结构设计)
@@ -17,6 +18,14 @@
 - [13. FAQ](#13-faq)
 
 ---
+
+## 获取二进制
+
+```bash
+go install github.com/ctkqiang/wifisec/cmd/wifisec@latest
+```
+
+其他获取方式（Release 下载、源码编译）见仓库 README。
 
 ## 1. 功能概述
 
@@ -478,7 +487,7 @@ sudo wifisec deauth <SSID> wlan1      # 指定接口（缺省取第一块无线�
 2. `pkg install root-repo && pkg install iw`。
 3. 芯片固件支持 monitor：Broadcom/Cypress 老芯片需 nexmon 补丁；Qualcomm 视机型而定；最稳妥方案为 Kali NetHunter。
 
-交叉编译：`CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -o wifisec-android ./cmd`
+交叉编译：`CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -o wifisec-android ./cmd/wifisec`
 
 ---
 
