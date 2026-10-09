@@ -15,10 +15,13 @@
 //     cmd 0x00 握手：回复 REP_PONG
 //     cmd 0x01 扫描：无 payload；逐条回 0x01 条目，结束后回 0x02
 //     cmd 0x02 注入：payload = 信道(1) + 802.11 帧（已剥 radiotap，由主机侧处理）
+//     cmd 0x03 关联尝试：payload = ssidLen(1) + ssid + passLen(1) + password
+//                       回复 0x03 关联结果（1 字节：0=失败 1=成功），随后 WiFi.disconnect
 //   ESP→主机: [0x5A][cmd][len_lo][len_hi][payload]
 //     0x00 PONG：协议版本(1) + 能力位图(1)，bit0 = 支持 5GHz
 //     0x01 扫描条目：bssid(6) + channel(1) + rssi(1,有符号) + ssidLen(1) + ssid
 //     0x02 扫描结束：无 payload
+//     0x03 关联结果：result(1)，0=密码错误/超时 1=关联成功
 //     0x04 错误：出错命令(1) + 错误码(1)
 //
 // 注入以最高速率进行，不给注入回 ACK——每条 ACK 都会占用串口带宽，
@@ -52,9 +55,11 @@ static const uint8_t  FRAME_HEAD_ESP  = 0x5A;
 static const uint8_t  CMD_PING        = 0x00;  // 握手请求，回复 REP_PONG
 static const uint8_t  CMD_SCAN        = 0x01;
 static const uint8_t  CMD_INJECT      = 0x02;
+static const uint8_t  CMD_ASSOC       = 0x03;  // 尝试关联 AP，payload 含 SSID 与密码
 static const uint8_t  REP_PONG        = 0x00;  // payload = 协议版本(1) + 能力位图(1)
 static const uint8_t  REP_SCAN_ENTRY  = 0x01;
 static const uint8_t  REP_SCAN_DONE   = 0x02;
+static const uint8_t  REP_ASSOC_RESULT = 0x03; // payload = result(1)：0 失败 1 成功
 static const uint8_t  REP_ERROR       = 0x04;
 static const uint8_t  PROTO_VERSION   = 1;
 
@@ -197,6 +202,51 @@ static void handleInject(const uint8_t* payload, uint16_t len) {
   digitalWrite(LED_PIN, !digitalRead(LED_PIN));
 }
 
+// handleAssoc 尝试用给定 SSID 与密码关联 AP，返回成功/失败后立即断开。
+// payload 布局：ssidLen(1) + ssid + passLen(1) + password。
+// WiFi.begin 是阻塞调用，现代 AP 在密码错误时通常 3-5 秒后返回 WL_CONNECT_FAILED；
+// 这里给 12 秒上限，超时按失败处理，避免主机侧 readFrame 空等到串口超时。
+static void handleAssoc(const uint8_t* payload, uint16_t len) {
+  if (len < 2) {
+    sendError(CMD_ASSOC, 2);
+    return;
+  }
+
+  uint8_t ssidLen = payload[0];
+  if (len < 1 + ssidLen + 1) {
+    sendError(CMD_ASSOC, 2);
+    return;
+  }
+  uint8_t passLen = payload[1 + ssidLen];
+  if (len < 1 + ssidLen + 1 + passLen) {
+    sendError(CMD_ASSOC, 2);
+    return;
+  }
+
+  // 直接从 payload 切片构造 String，避免缓冲区拷贝。
+  String ssid = String((const char*)(payload + 1), ssidLen);
+  String pass = String((const char*)(payload + 1 + ssidLen + 1), passLen);
+
+  // 关联期间 LED 常亮：与扫描一致，让用户肉眼可辨固件正忙。
+  digitalWrite(LED_PIN, LED_ON);
+
+  WiFi.begin(ssid.c_str(), pass.c_str());
+
+  uint32_t start = millis();
+  wl_status_t status;
+  while ((status = WiFi.status()) != WL_CONNECTED && millis() - start < 12000) {
+    delay(100);
+  }
+
+  uint8_t result = (status == WL_CONNECTED) ? 1 : 0;
+  sendReply(REP_ASSOC_RESULT, &result, 1);
+
+  // 无论成败都断开：brute force 场景下关联成功也只需知道密码正确，
+  // 不需要真正上网；保持连接会占用 STA 资源影响后续扫描/注入。
+  WiFi.disconnect();
+  digitalWrite(LED_PIN, LED_OFF);
+}
+
 void loop() {
   while (Serial.available() > 0) {
     uint8_t b = (uint8_t)Serial.read();
@@ -234,6 +284,7 @@ void loop() {
       if (rxCmd == CMD_PING) sendPong();
       else if (rxCmd == CMD_SCAN) handleScan();
       else if (rxCmd == CMD_INJECT) handleInject(rxBuf, rxLen);
+      else if (rxCmd == CMD_ASSOC) handleAssoc(rxBuf, rxLen);
       else sendError(rxCmd, 0xFF);
       rxState = 0;
     }

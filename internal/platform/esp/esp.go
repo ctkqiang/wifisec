@@ -32,16 +32,18 @@ const (
 	frameHeadHost = 0xA5
 	frameHeadESP  = 0x5A
 
-	// 命令字：主机侧有握手、扫描、注入三类请求。
+	// 命令字：主机侧有握手、扫描、注入、关联尝试四类请求。
 	cmdPing   = 0x00 // 握手；固件回 repPong 携带协议版本与能力位图
 	cmdScan   = 0x01 // 主机请求扫描；ESP 逐条回 scanEntry，最后回 scanDone
 	cmdInject = 0x02 // payload = 信道(1) + 802.11 帧（不含 radiotap）
+	cmdAssoc  = 0x03 // payload = ssidLen(1) + ssid + passLen(1) + password；尝试关联 AP
 
-	// 回复字：握手应答 / 扫描条目 / 扫描结束 / 错误。
-	repPong      = 0x00 // payload = 协议版本(1) + 能力位图(1，旧固件可缺省)
-	repScanEntry = 0x01 // payload = bssid(6) + channel(1) + rssi(1,有符号) + ssidLen(1) + ssid
-	repScanDone  = 0x02
-	repError     = 0x04 // payload = 出错命令(1) + 错误码(1)
+	// 回复字：握手应答 / 扫描条目 / 扫描结束 / 关联结果 / 错误。
+	repPong        = 0x00 // payload = 协议版本(1) + 能力位图(1，旧固件可缺省)
+	repScanEntry   = 0x01 // payload = bssid(6) + channel(1) + rssi(1,有符号) + ssidLen(1) + ssid
+	repScanDone    = 0x02
+	repAssocResult = 0x03 // payload = result(1)：0 失败 1 成功
+	repError       = 0x04 // payload = 出错命令(1) + 错误码(1)
 
 	// protoVersion 是本程序支持的固件协议版本。不一致说明固件过旧或过新，
 	// 命令语义可能对不上，必须拒绝并要求重新烧录，而不是带病运行。
@@ -244,6 +246,52 @@ func (i *Injector) Close() error {
 		return nil
 	}
 	return i.port.Close()
+}
+
+// Associate 让固件尝试用给定 SSID 与密码关联 AP，返回是否成功。
+// 关联成功与否固件侧都会立即 WiFi.disconnect，不真正上网；
+// 本方法用于在线密码字典爆破：每个密码尝试一次，命中即返回 true。
+//
+// 固件侧 WiFi.begin 最长阻塞 12 秒，超时按失败处理，
+// 因此主机侧读取预算需覆盖该窗口并留串口回传余量。
+func (i *Injector) Associate(ssid, password string) (bool, error) {
+	ssidBytes := []byte(ssid)
+	passBytes := []byte(password)
+
+	if len(ssidBytes) > 32 {
+		return false, errors.New("SSID 长度超过 32 字节上限")
+	}
+
+	payload := make([]byte, 0, 1+len(ssidBytes)+1+len(passBytes))
+	payload = append(payload, byte(len(ssidBytes)))
+	payload = append(payload, ssidBytes...)
+	payload = append(payload, byte(len(passBytes)))
+	payload = append(payload, passBytes...)
+
+	if _, err := i.port.Write(EncodeCommand(cmdAssoc, payload)); err != nil {
+		return false, fmt.Errorf("发送关联命令失败：%w", err)
+	}
+
+	// 固件侧最长等 12 秒，加 3 秒余量覆盖串口回传与调度抖动。
+	cmd, reply, err := i.readFrame(15 * time.Second)
+	if err != nil {
+		return false, fmt.Errorf("等待关联结果超时：%w", err)
+	}
+
+	switch cmd {
+	case repAssocResult:
+		if len(reply) < 1 {
+			return false, errors.New("关联结果帧载荷为空")
+		}
+		return reply[0] == 1, nil
+	case repError:
+		if len(reply) >= 2 {
+			return false, fmt.Errorf("固件执行关联命令失败，错误码 %d", reply[1])
+		}
+		return false, errors.New("固件执行关联命令失败")
+	default:
+		return false, fmt.Errorf("关联命令收到意外回复帧 0x%02X", cmd)
+	}
 }
 
 // EncodeCommand 按协议打包主机→固件命令帧。导出供 tests/ 验证帧布局。
