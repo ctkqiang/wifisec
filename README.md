@@ -193,7 +193,9 @@ wifisec/
 | 平台 | 文件 | 说明 |
 | ---- | ---- | ---- |
 | macOS | `wifisec-macos-app.zip` | 解压后得 `wifisec.app`，定位授权依赖 bundle |
-| Linux | `wifisec-linux-amd64` | 单文件二进制，`chmod +x` 后运行 |
+| Linux (amd64) | `wifisec-linux-amd64` | 单文件二进制，`chmod +x` 后运行 |
+| Linux (arm64) | `wifisec-linux-arm64` | 树莓派 / ARM 服务器 |
+| Android (Termux) | `wifisec-android-arm64` | 下载后 `chmod +x` 直接运行，无需 Go 环境 |
 | Windows | `wifisec-windows-amd64.exe` | 单文件可执行 |
 
 ```bash

@@ -87,7 +87,7 @@ var DeveloperMetadata = model.Developer{
 	Organisation: "哪吒网络安全",
 	Email:        "johnmelodymel@qq.com",
 	Weixin:       "ctkqiang",
-	Version:      "v0.0.1",
+	Version:      EffectiveVersion(),
 	ProjectUrl:   "https://github.com/ctkqiang/wifisec.git",
 }
 
