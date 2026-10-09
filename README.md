@@ -124,7 +124,7 @@ wifisec help                              # 用法总览
 | `list`    | 无线接口枚举与周边网络扫描 | [wifi_list.md](docs/feature/wifi_list.md)                |
 | `serial`  | 串口设备发现与 VID:PID 判读 | [wifi_serial.md](docs/feature/wifi_serial.md)            |
 | `deauth`  | 802.11 deauthentication 帧注入 | [wifi_deauth.md](docs/feature/wifi_deauth.md)        |
-| `brute`   | 在线密码字典爆破（协处理器逐密码关联尝试） | [wifi_brute_force.md](docs/feature/wifi_brute_force.md) |
+| `brute`   | 在线密码字典爆破（ESP 协处理器；无设备时回落本机网卡） | [wifi_brute_force.md](docs/feature/wifi_brute_force.md) |
 | 文档站    | HTML/JS/CSS 静态文档        | [docs/index.html](docs/index.html)（Arco Design 风格）   |
 
 ---

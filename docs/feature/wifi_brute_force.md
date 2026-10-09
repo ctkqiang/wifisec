@@ -1,6 +1,8 @@
 # 在线密码字典爆破（`wifisec brute`）
 
-`wifisec brute` 把密码字典逐条交给 ESP 协处理器执行真实关联尝试，固件回报「连上了 / 没连上」，命中即停并输出密码。它是**在线破解**（online attack）路径：每次都走完整的 WPA 四次握手，由 AP 亲自判定密码对错，而不是离线猜测。
+`wifisec brute` 把密码字典逐条交给无线芯片执行真实关联尝试，命中即停并输出密码。它是**在线破解**（online attack）路径：每次都走完整的 WPA 四次握手，由 AP 亲自判定密码对错，而不是离线猜测。
+
+**两条执行路径自动选择**：插入 ESP 开发板时走协处理器（关联跑在板载射频上，不碰本机网络配置，支持 SSID 与 BSSID 目标）；未检测到设备时回落**本机无线网卡**（macOS `networksetup` / Linux `nmcli` / Windows `netsh`，仅支持 SSID 目标，爆破期间本机 WiFi 会反复断开重连）。Android（Termux）未 root 时系统禁止编程关联 WiFi，只能走 ESP 路径。
 
 固件烧录与串口排错见 [wifi_deauth.md §5.4-§5.5](wifi_deauth.md)；串口发现见 [wifi_serial.md](wifi_serial.md)。
 
@@ -140,10 +142,20 @@ wifisec 当前固件未实现 monitor 抓包回传，离线路线不在能力范
 | `缺少字典文件参数` | 未传 `with-pass:` 路径 | 按 §2 用法补齐 |
 | `打开字典文件 ... 失败` | 路径错误或权限不足 | 确认路径；Termux 下注意 `~/storage` 需先 `termux-setup-storage` |
 | `字典文件为空` | 字典全是空行/注释 | 检查文件内容 |
-| `未找到目标` | 目标不在信号范围，或隐藏 SSID（§6.4） | 先用 `wifisec list` 或 `deauth` 的扫描确认目标可见 |
+| `未找到目标` | ESP 路径下目标不在信号范围，或隐藏 SSID（§6.4） | 先用 `wifisec list` 或 `deauth` 的扫描确认目标可见 |
 | `固件执行关联命令失败` | 固件过旧，不含 `0x03` 命令 | 重刷最新 `core/esp/esp.ino` |
 | `等待关联结果超时` | 串口链路中断或固件死机 | 重插板子；观察板载 LED 是否仍有心跳 |
+| `未找到 nmcli` | Linux 本机路径依赖 NetworkManager | 安装 `network-manager`，或插 ESP 走协处理器路径 |
+| `Android 未 root 无法编程关联 WiFi` | Android 10+ 系统限制 | 只能插 ESP 走协处理器路径 |
+| `本机网卡路径仅支持按 SSID 爆破` | 本机路径无法按 BSSID 反查 | 改用 SSID 作目标，或插 ESP |
 | 全部尝试连续超时 | AP 已限速/锁定（§6.2） | 暂停数分钟或换板后分段重试 |
+
+### 本机网卡路径的补充说明
+
+- **macOS**：经 `networksetup -setairportnetwork` 关联，密码错误时输出「Failed to join」按失败处理；失败尝试不会写入钥匙串，但当前已连的 WiFi 会被断开。
+- **Linux**：经 `nmcli` 用固定名 `wifisec-brute` 的**一次性连接配置**尝试，无论成败都删除——不会污染系统里你自己的同名 SSID 配置。`--wait 15` 压缩了 NetworkManager 默认 90 秒的激活等待。
+- **Windows**：`netsh` 导入临时 WLAN 配置发起连接，`connect` 返回只代表请求受理，成败靠轮询 `netsh wlan show interfaces` 判定（最多 12 秒）；配置用完即删。
+- 三者命中后都**不主动保留连接**：本机路径命中意味着本机已连上目标网络，不需要继续时手动断开即可。
 
 串口级排错（找不到板子、端口占用、74880 乱码）与 deauth 完全相同，见 [wifi_serial.md §6](wifi_serial.md) 与 [wifi_deauth.md §5.5](wifi_deauth.md)。
 
