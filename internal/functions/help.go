@@ -1,12 +1,13 @@
 package functions
 
 import (
+	"strings"
+
 	"github.com/ctkqiang/wifisec/internal/constants"
 	"github.com/ctkqiang/wifisec/internal/utilities"
-	"strings"
 )
 
-// helpUsageLines 汇总全部子命令的用法说明，与 cmd/main.go 的
+// helpUsageLines 汇总全部子命令的用法说明，与 cmd/wifisec/main.go 的
 // commandHandlers 一一对应：新增子命令时必须同步补充对应行，
 // 否则用户只能翻源码才知道怎么传参。
 // 文本整块经一次 Info 输出，避免逐行 printf 打散日志前缀。

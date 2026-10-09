@@ -95,7 +95,7 @@ WifiSec 是 Go 编写的无线安全测试工具，采用 Hexagonal Architecture
 
 ```mermaid
 flowchart TB
-    CLI["cmd/main.go<br/>命令路由: list / serial / deauth / help"] --> APP["internal/functions<br/>应用编排: deauther · lists · serial"]
+    CLI["cmd/wifisec/main.go<br/>命令路由: list / serial / deauth / help"] --> APP["internal/functions<br/>应用编排: deauther · lists · serial"]
     APP -->|"端口: frameWriter<br/>channelSetter"| ESP["internal/platform/esp<br/>串口帧协议 · 复位时序 · 噪声重同步"]
     APP -->|"端口: 无线扫描"| DAR["darwin · CoreWLAN"]
     APP --> LIN["linux · iw + AF_PACKET<br/>termux · Android API"]
@@ -157,7 +157,7 @@ wifisec help                              # 用法总览
 
 ```
 wifisec/
-├── cmd/main.go                          # 入口：命令注册与路由（list/serial/deauth/help）
+├── cmd/wifisec/main.go                  # 入口：命令注册与路由（list/serial/deauth/help）
 ├── core/esp/esp.ino                     # 协处理器固件（ESP8266/ESP32 全系，编译期条件分支）
 ├── internal/
 │   ├── constants/                       # 开发者元数据等常量
@@ -203,10 +203,10 @@ gh release download --repo ctkqiang/wifisec --pattern 'wifisec-linux-amd64'   # 
 ### go install（最简单）
 
 ```bash
-go install github.com/ctkqiang/wifisec/cmd@latest
+go install github.com/ctkqiang/wifisec/cmd/wifisec@latest
 ```
 
-> `go install` 使用目录名作为二进制名。默认安装到 `$(go env GOPATH)/bin/`（macOS/Linux 通常为 `~/go/bin/`），首次安装后记得把这个目录放进 `PATH`。由于二进制入口在 `cmd/` 下，安装后的默认文件名是 `cmd`；你可以 `mv $(go env GOPATH)/bin/cmd $(go env GOPATH)/bin/wifisec`，或者直接 `alias wifisec=$(go env GOPATH)/bin/cmd`。
+> `go install` 取包路径最后一段作为二进制名（`cmd/wifisec` → `wifisec`）。默认安装到 `$(go env GOPATH)/bin/`（macOS/Linux/Termux 通常为 `~/go/bin/`），首次安装后记得把这个目录放进 `PATH`。
 
 ## 编译与运行
 

@@ -113,7 +113,7 @@ frame[radiotapHeaderLen] = byte(subtypeDeauth<<4 | typeManagement<<2) // = 0xC0
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  cmd/main.go   注册 "deauth" → WifiDeauther      │
+│  cmd/wifisec/main.go 注册 "deauth" → WifiDeauther│
 ├─────────────────────────────────────────────────┤
 │  internal/functions/deauther.go                  │
 │    平台路由 · 参数解析 · 目标筛选 · 注入循环编排    │
@@ -565,7 +565,7 @@ EMBEDDED_MODE? ──true──→ deauthESP（串口路径，无权限要求）
 EXIT
 ```
 
-**信号处理细节**：`cmd/main.go` 注册的全局信号处理器会无条件 `os.Exit(0)`，deauth 路径先执行 `signal.Reset(SIGINT, SIGTERM)` 再 `signal.NotifyContext` 接管——否则清理代码（删除 monitor 接口）永远不会执行。
+**信号处理细节**：`cmd/wifisec/main.go` 注册的全局信号处理器会无条件 `os.Exit(0)`，deauth 路径先执行 `signal.Reset(SIGINT, SIGTERM)` 再 `signal.NotifyContext` 接管——否则清理代码（删除 monitor 接口）永远不会执行。
 
 ---
 

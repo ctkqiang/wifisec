@@ -4,7 +4,7 @@
 
 `list` 子命令枚举当前主机的无线接口，并扫描周边 Wi-Fi 网络。已连接与未连接的网络合并在同一张表中呈现，输出风格对齐 aircrack-ng 套件：接口视图参考 airmon-ng，扫描视图参考 airodump-ng。
 
-实现位于 `internal/functions/lists.go`，命令入口为 `functions.WifiList`，经 `cmd/main.go` 的命令注册表分发。
+实现位于 `internal/functions/lists.go`，命令入口为 `functions.WifiList`，经 `cmd/wifisec/main.go` 的命令注册表分发。
 
 ## 使用方式
 
@@ -17,7 +17,7 @@ make list
 等价于：
 
 ```bash
-go run -race cmd/main.go list
+go run -race ./cmd/wifisec list
 ```
 
 先输出无线接口表，随后输出周边网络表。已连接网络置顶，其余按信号强度降序排列。
@@ -48,7 +48,7 @@ make list TARGET=CafeGuest
 等价于：
 
 ```bash
-go run -race cmd/main.go list CafeGuest
+go run -race ./cmd/wifisec list CafeGuest
 ```
 
 传入 ESSID 或 BSSID 后进入锁定模式：跳过接口表，只显示命中的目标网络。行为对齐 airodump-ng 的 `--bssid` 过滤。注意 make 会把不带 `TARGET=` 的参数当作构建目标，务必使用 `TARGET=` 传参。

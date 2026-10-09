@@ -1,6 +1,8 @@
 .PHONY: run build clean tidy format test list help
 
-MAIN_PATH := cmd/main.go
+# 入口在 cmd/wifisec 包内：go install 二进制名取自包目录名，
+# 按包路径构建也避免入口拆成多文件时按文件名编译漏文件
+MAIN_PATH := ./cmd/wifisec
 BUILD_PATH := build
 APP_NAME := wifisec
 

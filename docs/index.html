@@ -164,7 +164,7 @@
               <tr>
                 <td><strong>go install</strong>（推荐）</td>
                 <td>已有 Go 环境</td>
-                <td><code>go install github.com/ctkqiang/wifisec/cmd@latest</code></td>
+                <td><code>go install github.com/ctkqiang/wifisec/cmd/wifisec@latest</code></td>
               </tr>
               <tr>
                 <td>GitHub Release</td>
@@ -181,7 +181,7 @@
         </div>
         <div class="alert info">
           <span class="alert-icon">ⓘ</span>
-          <div><code>go install</code> 安装到 <code>$(go env GOPATH)/bin/</code>，首次使用记得把该目录加进 <code>PATH</code>。安装后的二进制名是 <code>cmd</code>（取目录名），可 <code>mv</code> 或 <code>alias</code> 为 <code>wifisec</code>。</div>
+          <div><code>go install</code> 安装到 <code>$(go env GOPATH)/bin/</code>，首次使用记得把该目录加进 <code>PATH</code>。二进制名取包路径最后一段，装好即是 <code>wifisec</code>。</div>
         </div>
         <ol class="steps">
           <li><span class="step-dot">1</span><strong>编译</strong>依赖 Go 1.26+，无 CGO：<pre><code class="lang-bash">make build   <span class="cmt"># 产物 build/wifisec（macOS 额外产出 .app bundle 供定位授权）</span></code></pre></li>
