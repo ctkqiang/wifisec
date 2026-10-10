@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"go.bug.st/serial"
@@ -32,11 +33,19 @@ const (
 	frameHeadHost = 0xA5
 	frameHeadESP  = 0x5A
 
-	// 命令字：主机侧有握手、扫描、注入、关联尝试四类请求。
+	// 命令字：主机侧有握手、扫描、注入、关联尝试、克隆 AP 五类请求。
 	cmdPing   = 0x00 // 握手；固件回 repPong 携带协议版本与能力位图
 	cmdScan   = 0x01 // 主机请求扫描；ESP 逐条回 scanEntry，最后回 scanDone
 	cmdInject = 0x02 // payload = 信道(1) + 802.11 帧（不含 radiotap）
 	cmdAssoc  = 0x03 // payload = ssidLen(1) + ssid + passLen(1) + password；尝试关联 AP
+
+	// 命令字（克隆）：0x04 保留给错误帧方向，克隆从 0x05 起编。
+	cmdClone       = 0x05 // payload = op(1) + channel(1) + ssidLen(1) + ssid + passLen(1) + password
+	cmdCloneStatus = 0x06 // 无 payload；查询克隆 AP 的在线设备
+
+	// 克隆操作码（cmdClone payload 首字节）。
+	cloneOpDown = 0x00
+	cloneOpUp   = 0x01
 
 	// 回复字：握手应答 / 扫描条目 / 扫描结束 / 关联结果 / 错误。
 	repPong        = 0x00 // payload = 协议版本(1) + 能力位图(1，旧固件可缺省)
@@ -44,6 +53,10 @@ const (
 	repScanDone    = 0x02
 	repAssocResult = 0x03 // payload = result(1)：0 失败 1 成功
 	repError       = 0x04 // payload = 出错命令(1) + 错误码(1)
+
+	// 回复字（克隆）。
+	repCloneResult = 0x05 // payload = result(1) + apMAC(6)；down 回复 MAC 全零
+	repCloneStatus = 0x06 // payload = count(1) + count×MAC(6)
 
 	// protoVersion 是本程序支持的固件协议版本。不一致说明固件过旧或过新，
 	// 命令语义可能对不上，必须拒绝并要求重新烧录，而不是带病运行。
@@ -57,6 +70,10 @@ const (
 	// scanReadTimeout 是单帧回复的读取预算；覆盖一次完整扫描
 	//（2.4GHz 约 2-3 秒，双频芯片扫 5GHz 更久）加串口回传绰绰有余。
 	scanReadTimeout = 15 * time.Second
+
+	// cloneReplyTimeout 覆盖克隆开关与状态查询的回复预算：
+	// SoftAP 开关是亚秒级调用，轮询为即时应答，5 秒已富余。
+	cloneReplyTimeout = 5 * time.Second
 
 	// 打开串口会触发板子复位重启，boot 期间主机发来的命令全部丢失，
 	// 因此握手需要重试：每次发 PING 后等 handshakeTimeout，整体覆盖冷启动。
@@ -80,6 +97,8 @@ type Network struct {
 
 // Injector 封装串口句柄，实现 deauther 的 frameWriter / channelSetter 契约。
 type Injector struct {
+	mu sync.Mutex // 串口是严格请求-应答流，事务级互斥保证 kick 注入与状态轮询等并发调用不交错
+
 	port       serial.Port
 	channel    int    // 当前注入信道；逐帧随注入命令下发，这里仅缓存
 	version    byte   // 握手时固件上报的协议版本
@@ -185,6 +204,9 @@ func (i *Injector) FirmwareVersion() byte {
 // SetChannel 缓存注入信道；实际切信道随每帧注入命令下发，
 // 避免在多目标轮发时产生两倍串口流量。
 func (i *Injector) SetChannel(channel int) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
 	i.channel = channel
 	return nil
 }
@@ -202,6 +224,9 @@ func (i *Injector) Write(frame []byte) error {
 	payload = append(payload, byte(i.channel))
 	payload = append(payload, frame[radiotapHeaderLen:]...)
 
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
 	_, err := i.port.Write(EncodeCommand(cmdInject, payload))
 	return err
 }
@@ -210,6 +235,9 @@ func (i *Injector) Write(frame []byte) error {
 // 返回的频段范围取决于固件能力：2.4GHz 芯片只回 2.4GHz 结果，
 // ESP32-C5 会同时回 5GHz 结果。
 func (i *Injector) Scan() ([]Network, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
 	if _, err := i.port.Write(EncodeCommand(cmdScan, nil)); err != nil {
 		return nil, fmt.Errorf("发送扫描命令失败：%w", err)
 	}
@@ -255,6 +283,9 @@ func (i *Injector) Close() error {
 // 固件侧 WiFi.begin 最长阻塞 12 秒，超时按失败处理，
 // 因此主机侧读取预算需覆盖该窗口并留串口回传余量。
 func (i *Injector) Associate(ssid, password string) (bool, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
 	ssidBytes := []byte(ssid)
 	passBytes := []byte(password)
 
@@ -294,11 +325,184 @@ func (i *Injector) Associate(ssid, password string) (bool, error) {
 	}
 }
 
+// CloneAPUp 让固件在指定信道开启克隆 AP（SoftAP，同名同密码）。
+// 固件切 AP+STA 双模：AP 侧承载克隆网络，STA 接口保留给 kick 注入。
+// 返回克隆 AP 自身的 MAC——对客户端而言它就是克隆网络的 BSSID。
+// 密码传空串即开放网络；合法性（8-63 字节 WPA2 规则）由应用层校验，
+// 协议层只负责打包传输。
+func (i *Injector) CloneAPUp(ssid, password string, channel int) (string, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	payload, err := buildClonePayload(cloneOpUp, channel, ssid, password)
+	if err != nil {
+		return "", err
+	}
+
+	if _, err := i.port.Write(EncodeCommand(cmdClone, payload)); err != nil {
+		return "", fmt.Errorf("发送克隆命令失败：%w", err)
+	}
+
+	cmd, reply, err := i.readFrame(cloneReplyTimeout)
+	if err != nil {
+		return "", fmt.Errorf("等待克隆结果超时：%w", err)
+	}
+
+	switch cmd {
+	case repCloneResult:
+		ok, apMAC, err := ParseCloneResult(reply)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return "", errors.New("固件开启 SoftAP 失败（信道超出射频能力或参数非法）")
+		}
+		return apMAC, nil
+	case repError:
+		return "", cloneFirmwareError("克隆", reply)
+	default:
+		return "", fmt.Errorf("克隆命令收到意外回复帧 0x%02X", cmd)
+	}
+}
+
+// CloneAPDown 停止固件上的克隆 AP 并恢复 STA 模式。
+// 对未运行克隆 AP 的固件同样安全：softAPdisconnect 为空操作。
+func (i *Injector) CloneAPDown() error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	payload, err := buildClonePayload(cloneOpDown, 1, "", "")
+	if err != nil {
+		return err
+	}
+
+	if _, err := i.port.Write(EncodeCommand(cmdClone, payload)); err != nil {
+		return fmt.Errorf("发送停止克隆命令失败：%w", err)
+	}
+
+	cmd, reply, err := i.readFrame(cloneReplyTimeout)
+	if err != nil {
+		return fmt.Errorf("等待停止克隆结果超时：%w", err)
+	}
+
+	switch cmd {
+	case repCloneResult:
+		ok, _, err := ParseCloneResult(reply)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("固件停止 SoftAP 失败")
+		}
+		return nil
+	case repError:
+		return cloneFirmwareError("停止克隆", reply)
+	default:
+		return fmt.Errorf("停止克隆命令收到意外回复帧 0x%02X", cmd)
+	}
+}
+
+// CloneStatus 查询克隆 AP 当前接入的设备 MAC 列表。
+// 供会话循环按固定节奏轮询，差分出设备接入/离开事件。
+func (i *Injector) CloneStatus() ([]string, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	if _, err := i.port.Write(EncodeCommand(cmdCloneStatus, nil)); err != nil {
+		return nil, fmt.Errorf("发送克隆状态查询失败：%w", err)
+	}
+
+	cmd, reply, err := i.readFrame(cloneReplyTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("等待克隆状态超时：%w", err)
+	}
+
+	switch cmd {
+	case repCloneStatus:
+		return ParseCloneStatus(reply)
+	case repError:
+		return nil, cloneFirmwareError("克隆状态", reply)
+	default:
+		return nil, fmt.Errorf("克隆状态查询收到意外回复帧 0x%02X", cmd)
+	}
+}
+
+// buildClonePayload 打包克隆命令载荷：op(1) + channel(1) + ssidLen(1) + ssid
+// + passLen(1) + password。down 指令以信道 1、空 SSID 占位，固件忽略其余字段，
+// 固定布局让固件解析器无需按操作码分支。
+func buildClonePayload(op byte, channel int, ssid, password string) ([]byte, error) {
+	ssidBytes := []byte(ssid)
+	passBytes := []byte(password)
+
+	if op == cloneOpUp {
+		if len(ssidBytes) < 1 || len(ssidBytes) > 32 {
+			return nil, errors.New("SSID 长度需在 1-32 字节之间")
+		}
+	}
+	if len(passBytes) > 63 {
+		return nil, errors.New("密码长度超过 63 字节上限")
+	}
+
+	payload := make([]byte, 0, 3+len(ssidBytes)+1+len(passBytes))
+	payload = append(payload, op, byte(channel), byte(len(ssidBytes)))
+	payload = append(payload, ssidBytes...)
+	payload = append(payload, byte(len(passBytes)))
+	payload = append(payload, passBytes...)
+	return payload, nil
+}
+
+// cloneFirmwareError 把 repError 载荷翻译成可操作错误。
+// 错误码 0xFF 是固件命令分发的兜底回复，意味着固件里根本没有这条命令
+// （版本过旧），重试无意义，直接引导重烧固件。
+func cloneFirmwareError(op string, reply []byte) error {
+	if len(reply) >= 2 && reply[1] == 0xFF {
+		return fmt.Errorf("固件不支持%s命令（错误码 255），请重新烧录 core/esp/esp.ino 最新固件", op)
+	}
+	if len(reply) >= 2 {
+		return fmt.Errorf("固件执行%s命令失败，错误码 %d", op, reply[1])
+	}
+	return fmt.Errorf("固件执行%s命令失败", op)
+}
+
 // EncodeCommand 按协议打包主机→固件命令帧。导出供 tests/ 验证帧布局。
 func EncodeCommand(cmd byte, payload []byte) []byte {
 	frame := make([]byte, 0, 4+len(payload))
 	frame = append(frame, frameHeadHost, cmd, byte(len(payload)), byte(len(payload)>>8))
 	return append(frame, payload...)
+}
+
+// ParseCloneResult 解析克隆结果载荷：result(1) + apMAC(6)。
+// up 成功时 MAC 为固件 SoftAP 的自身地址；down 回复 MAC 全零。
+// 导出供 tests/ 做表驱动测试。
+func ParseCloneResult(payload []byte) (ok bool, apMAC string, err error) {
+	if len(payload) < 7 {
+		return false, "", errors.New("克隆结果载荷长度不足 7 字节")
+	}
+	return payload[0] == 1, macString(payload[1:7]), nil
+}
+
+// ParseCloneStatus 解析克隆状态载荷：count(1) + count×MAC(6)。
+// 导出供 tests/ 做表驱动测试。
+func ParseCloneStatus(payload []byte) ([]string, error) {
+	if len(payload) < 1 {
+		return nil, errors.New("克隆状态载荷为空")
+	}
+
+	count := int(payload[0])
+	if len(payload) < 1+6*count {
+		return nil, errors.New("克隆状态 MAC 列表越界")
+	}
+
+	macs := make([]string, 0, count)
+	for k := range count {
+		macs = append(macs, macString(payload[1+k*6:7+k*6]))
+	}
+	return macs, nil
+}
+
+// macString 把 6 字节 MAC 格式化为小写冒号分隔串。
+func macString(b []byte) string {
+	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", b[0], b[1], b[2], b[3], b[4], b[5])
 }
 
 // ParseScanEntry 解析一条扫描条目载荷。导出供 tests/ 做表驱动测试。

@@ -17,12 +17,17 @@
 //     cmd 0x02 注入：payload = 信道(1) + 802.11 帧（已剥 radiotap，由主机侧处理）
 //     cmd 0x03 关联尝试：payload = ssidLen(1) + ssid + passLen(1) + password
 //                       回复 0x03 关联结果（1 字节：0=失败 1=成功），随后 WiFi.disconnect
+//     cmd 0x05 克隆 AP：payload = op(1) + channel(1) + ssidLen(1) + ssid
+//                       + passLen(1) + password；op 1=up 0=down
+//     cmd 0x06 状态查询：无 payload；回复 0x06 在线设备
 //   ESP→主机: [0x5A][cmd][len_lo][len_hi][payload]
 //     0x00 PONG：协议版本(1) + 能力位图(1)，bit0 = 支持 5GHz
 //     0x01 扫描条目：bssid(6) + channel(1) + rssi(1,有符号) + ssidLen(1) + ssid
 //     0x02 扫描结束：无 payload
 //     0x03 关联结果：result(1)，0=密码错误/超时 1=关联成功
 //     0x04 错误：出错命令(1) + 错误码(1)
+//     0x05 克隆结果：result(1) + apMAC(6)；down 回复 MAC 全零
+//     0x06 在线设备：count(1) + count×MAC(6)
 //
 // 注入以最高速率进行，不给注入回 ACK——每条 ACK 都会占用串口带宽，
 // 拖慢帧率，丢失比确认更重要。
@@ -56,12 +61,24 @@ static const uint8_t  CMD_PING        = 0x00;  // 握手请求，回复 REP_PONG
 static const uint8_t  CMD_SCAN        = 0x01;
 static const uint8_t  CMD_INJECT      = 0x02;
 static const uint8_t  CMD_ASSOC       = 0x03;  // 尝试关联 AP，payload 含 SSID 与密码
+static const uint8_t  CMD_CLONE       = 0x05;  // 开/停克隆 AP（SoftAP），payload 含 SSID 与密码
+static const uint8_t  CMD_CLONE_STATUS = 0x06; // 查询克隆 AP 在线设备
 static const uint8_t  REP_PONG        = 0x00;  // payload = 协议版本(1) + 能力位图(1)
 static const uint8_t  REP_SCAN_ENTRY  = 0x01;
 static const uint8_t  REP_SCAN_DONE   = 0x02;
 static const uint8_t  REP_ASSOC_RESULT = 0x03; // payload = result(1)：0 失败 1 成功
 static const uint8_t  REP_ERROR       = 0x04;
+static const uint8_t  REP_CLONE_RESULT = 0x05; // payload = result(1) + apMAC(6)
+static const uint8_t  REP_CLONE_STATUS = 0x06; // payload = count(1) + count×MAC(6)
 static const uint8_t  PROTO_VERSION   = 1;
+
+// 克隆 AP 运行标志：置位时心跳暂停、LED 常亮，让用户不看终端
+// 也能分辨「AP 正在广播」与「固件空闲待命」。
+static bool apActive = false;
+
+// 克隆 AP 的 SoftAP 最多接入站数：ESP8266 射频上限 4，ESP32 为 10，
+// 状态查询的载荷缓冲按两者较大值预留。
+static const uint8_t MAX_SOFTAP_STATIONS = 10;
 
 // 能力位图 bit0 = 支持 5GHz 注入。乐鑫全系当前只有 ESP32-C5 是双频，
 // 其余芯片（含全部 ESP8266）射频物理上只覆盖 2.4GHz。
@@ -247,6 +264,105 @@ static void handleAssoc(const uint8_t* payload, uint16_t len) {
   digitalWrite(LED_PIN, LED_OFF);
 }
 
+// handleClone 开启或停止克隆 AP（Evil Twin 的发射端）。
+// payload 布局：op(1) + channel(1) + ssidLen(1) + ssid + passLen(1) + password。
+// up 时固件切 AP+STA 双模：AP 侧承载克隆网络，保留 STA 接口供主机持续
+// 注入 kick deauth 帧——著名 ESP8266 deauther 项目已验证 AP 与自由帧
+// 注入可在同一射频上共存。密码为空即开放网络。
+static void handleClone(const uint8_t* payload, uint16_t len) {
+  if (len < 1) {
+    sendError(CMD_CLONE, 2);
+    return;
+  }
+  uint8_t op = payload[0];
+
+  // down：停 AP、恢复 STA 模式、LED 交还心跳。回复 MAC 全零占位。
+  if (op == 0) {
+    WiFi.softAPdisconnect(true);
+    WiFi.mode(WIFI_STA);
+    apActive = false;
+    digitalWrite(LED_PIN, LED_OFF);
+    uint8_t reply[7] = {1, 0, 0, 0, 0, 0, 0};
+    sendReply(REP_CLONE_RESULT, reply, sizeof(reply));
+    return;
+  }
+
+  if (len < 3) {
+    sendError(CMD_CLONE, 2);
+    return;
+  }
+  uint8_t channel = payload[1];
+  uint8_t ssidLen = payload[2];
+  if (ssidLen < 1 || ssidLen > 32 || len < 3 + ssidLen + 1) {
+    sendError(CMD_CLONE, 2);
+    return;
+  }
+  uint8_t passLen = payload[3 + ssidLen];
+  if (len < 3 + ssidLen + 1 + passLen) {
+    sendError(CMD_CLONE, 2);
+    return;
+  }
+  if (!channelSupported(channel)) {
+    sendError(CMD_CLONE, 3);
+    return;
+  }
+
+  String ssid = String((const char*)(payload + 3), ssidLen);
+  String pass = String((const char*)(payload + 3 + ssidLen + 1), passLen);
+
+  // AP 运行期间 LED 常亮（心跳在 loop 中按 apActive 跳过）。
+  digitalWrite(LED_PIN, LED_ON);
+
+  WiFi.mode(WIFI_AP_STA);
+
+  // ESP32 显式放开 10 站上限（老核心默认 4）；ESP8266 射频上限即 4，
+  // 参数保持默认。
+#if defined(ESP32)
+  bool ok = WiFi.softAP(ssid.c_str(), pass.c_str(), channel, 0, MAX_SOFTAP_STATIONS);
+#else
+  bool ok = WiFi.softAP(ssid.c_str(), pass.c_str(), channel);
+#endif
+
+  uint8_t reply[7] = {ok ? 1 : 0, 0, 0, 0, 0, 0, 0};
+  if (ok) {
+    WiFi.softAPmacAddress(reply + 1);
+    apActive = true;
+  } else {
+    digitalWrite(LED_PIN, LED_OFF);
+  }
+  sendReply(REP_CLONE_RESULT, reply, sizeof(reply));
+}
+
+// handleCloneStatus 回报克隆 AP 的在线设备。ESP8266 经 user_interface 的
+// station_info 链表逐台取 MAC；ESP32 用 esp_wifi_ap_get_sta_list（IDF 4.x
+// 稳定 API）取 wifi_sta_list_t。两系均回 count + MAC 列表，格式一致。
+static void handleCloneStatus() {
+  uint8_t payload[1 + 6 * MAX_SOFTAP_STATIONS];
+  uint8_t count = 0;
+
+#if defined(ESP8266)
+  struct station_info* sta = wifi_softap_get_station_info();
+  while (sta != NULL && count < MAX_SOFTAP_STATIONS) {
+    memcpy(payload + 1 + count * 6, sta->bssid, 6);
+    count++;
+    sta = STAILQ_NEXT(sta, next);
+  }
+  wifi_softap_free_station_info();
+#elif defined(ESP32)
+  wifi_sta_list_t list;
+  if (esp_wifi_ap_get_sta_list(&list) == ESP_OK) {
+    count = list.num;
+    if (count > MAX_SOFTAP_STATIONS) count = MAX_SOFTAP_STATIONS;
+    for (uint8_t k = 0; k < count; k++) {
+      memcpy(payload + 1 + k * 6, list.sta[k].mac, 6);
+    }
+  }
+#endif
+
+  payload[0] = count;
+  sendReply(REP_CLONE_STATUS, payload, 1 + (uint16_t)count * 6);
+}
+
 void loop() {
   while (Serial.available() > 0) {
     uint8_t b = (uint8_t)Serial.read();
@@ -285,14 +401,17 @@ void loop() {
       else if (rxCmd == CMD_SCAN) handleScan();
       else if (rxCmd == CMD_INJECT) handleInject(rxBuf, rxLen);
       else if (rxCmd == CMD_ASSOC) handleAssoc(rxBuf, rxLen);
+      else if (rxCmd == CMD_CLONE) handleClone(rxBuf, rxLen);
+      else if (rxCmd == CMD_CLONE_STATUS) handleCloneStatus();
       else sendError(rxCmd, 0xFF);
       rxState = 0;
     }
   }
 
   // 空闲心跳：每 500ms 翻转一次 LED，表示固件存活、串口待命。
-  // 用 millis() 非阻塞实现，不会拖慢串口状态机。
-  if (millis() - lastHeartbeat >= HEARTBEAT_MS) {
+  // 克隆 AP 运行期间暂停心跳、保持常亮；用 millis() 非阻塞实现，
+  // 不会拖慢串口状态机。
+  if (!apActive && millis() - lastHeartbeat >= HEARTBEAT_MS) {
     lastHeartbeat = millis();
     digitalWrite(LED_PIN, !digitalRead(LED_PIN));
   }
