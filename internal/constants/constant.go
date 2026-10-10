@@ -18,6 +18,7 @@ const (
 
 const (
 	ColorReset   = "\033[0m"
+	ColorBold    = "\033[1m"
 	ColorGray    = "\033[90m"
 	ColorBlue    = "\033[34m"
 	ColorCyan    = "\033[36m"
