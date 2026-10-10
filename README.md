@@ -103,13 +103,15 @@ WifiSec 是 Go 编写的无线安全测试工具，采用 Hexagonal Architecture
 
 ```mermaid
 flowchart TB
-    CLI["cmd/wifisec/main.go<br/>命令路由: list / serial / deauth / brute / help"] --> APP["internal/functions<br/>应用编排: deauther · brute · lists · serial"]
+    CLI["cmd/wifisec/main.go<br/>命令路由: list / serial / deauth / brute / clone / devices / scan_ports / get_packet / help"] --> APP["internal/functions<br/>应用编排: deauther · brute · clone · devices · portscan · sniff · lists · serial"]
     APP -->|"端口: frameWriter<br/>channelSetter"| ESP["internal/platform/esp<br/>串口帧协议 · 复位时序 · 噪声重同步"]
     APP -->|"端口: 无线扫描"| DAR["darwin · CoreWLAN"]
     APP --> LIN["linux · iw + AF_PACKET<br/>termux · Android API"]
     APP --> WIN["windows · Npcap + netsh"]
+    APP --> LAN["lan · 邻居表/网关<br/>capture · AF_PACKET/BPF/Npcap"]
     ESP -->|"115200 8N1"| HW["ESP8266 / ESP32<br/>core/esp/esp.ino"]
     IEEE["internal/ieee80211<br/>deauth 帧纯字节编解码"] -.-> APP
+    PCAP["internal/pcapfile + ethernet<br/>pcap 写入器 · 帧摘要"] -.-> LAN
     ESP --> HW2["射频注入<br/>wifi_send_pkt_freedom / esp_wifi_80211_tx"]
 ```
 
@@ -124,6 +126,11 @@ wifisec list                              # 列出无线接口与周边网络
 wifisec serial                            # 列出 USB 串口设备（协处理器入口排查）
 wifisec deauth <ssid|bssid> [串口]        # 对目标持续发送 deauth 帧，Ctrl-C 停止
 wifisec brute <ssid|bssid> with-pass: <字典> [串口]   # 在线密码字典爆破，命中即停
+wifisec clone <ssid>:<密码> up [nokick] [串口]        # 克隆同名热点（Evil Twin），Ctrl-C 结束
+wifisec clone down [串口]                 # 停止固件上的克隆热点
+wifisec devices [网卡名]                  # 列出当前局域网在线设备（IP/MAC/主机名/网关），免 root
+wifisec scan_ports <目标> [端口]          # nmap 风格 TCP 扫描：open/closed/filtered + banner
+wifisec get_packet [网卡] [秒] [文件]     # 抓包导出 pcap（Wireshark 直读），Ctrl-C 结束
 wifisec help                              # 用法总览
 ```
 
@@ -133,6 +140,10 @@ wifisec help                              # 用法总览
 | `serial`  | 串口设备发现与 VID:PID 判读 | [wifi_serial.md](docs/feature/wifi_serial.md)            |
 | `deauth`  | 802.11 deauthentication 帧注入 | [wifi_deauth.md](docs/feature/wifi_deauth.md)        |
 | `brute`   | 在线密码字典爆破，命中即停并输出 SSID/BSSID/密码凭证块（ESP 协处理器；无设备时回落本机网卡） | [wifi_brute_force.md](docs/feature/wifi_brute_force.md) |
+| `clone`   | 热点克隆（Evil Twin）：同名同密码 SoftAP + 可选 kick 驱赶真实 AP 客户端（ESP 协处理器；无设备时回落 Linux hostapd） | [wifi_clone.md](docs/feature/wifi_clone.md) |
+| `devices` | 局域网设备发现：TCP 探针刷 ARP + 系统邻居表交叉，输出 IP/MAC/主机名/角色，四平台免 root | [lan_analysis.md](docs/feature/lan_analysis.md) |
+| `scan_ports` | nmap 风格 TCP connect 扫描（200 并发、1.5s 超时），open/closed/filtered 三态 + 被动 banner 抓取，四平台免 root | [lan_analysis.md](docs/feature/lan_analysis.md) |
+| `get_packet` | 连接态网卡抓包：Linux AF_PACKET / macOS BPF / Windows Npcap，实时摘要限速打印，全帧写 pcap 供 Wireshark 分析 | [lan_analysis.md](docs/feature/lan_analysis.md) |
 | 文档站    | HTML/JS/CSS 静态文档        | [docs/index.html](docs/index.html)（Arco Design 风格）   |
 
 ---
@@ -157,6 +168,10 @@ wifisec help                              # 用法总览
 | `0x03`       | 主机→ESP  | 关联尝试 | ssidLen(1) + ssid + passLen(1) + password         |
 | `0x03`       | ESP→主机  | 关联结果 | result(1)：0 = 密码错误/超时，1 = 关联成功        |
 | `0x04`       | ESP→主机  | 错误     | 出错命令(1) + 错误码(1)                           |
+| `0x05`       | 主机→ESP  | 克隆开关 | op(1) + channel(1) + ssidLen(1) + ssid + passLen(1) + password |
+| `0x05`       | ESP→主机  | 克隆结果 | result(1) + apMAC(6)；down 回复 MAC 全零          |
+| `0x06`       | 主机→ESP  | 克隆状态 | 无                                                |
+| `0x06`       | ESP→主机  | 在线设备 | count(1) + count×MAC(6)                           |
 
 两个关键设计：
 
@@ -169,19 +184,23 @@ wifisec help                              # 用法总览
 
 ```
 wifisec/
-├── cmd/wifisec/main.go                  # 入口：命令注册与路由（list/serial/deauth/brute/help）
+├── cmd/wifisec/main.go                  # 入口：命令注册与路由（list/serial/deauth/brute/clone/devices/scan_ports/get_packet/help）
 ├── core/esp/esp.ino                     # 协处理器固件（ESP8266/ESP32 全系，编译期条件分支）
 ├── internal/
 │   ├── constants/                       # 开发者元数据等常量
-│   ├── functions/                       # 应用编排：deauther · connect(brute) · lists · serial · help
+│   ├── functions/                       # 应用编排：deauther · connect(brute) · clone · devices · portscan · sniff · lists · serial · help
+│   ├── ethernet/frame.go                # 局域网抓包帧摘要（ARP/IPv4/IPv6/TCP/UDP/ICMP/EAPOL/LLDP）
 │   ├── ieee80211/frame.go               # deauth 帧纯字节编解码（与介质解耦，可独立单测）
 │   ├── model/                           # wifi / command / author 领域模型
+│   ├── pcapfile/pcap.go                 # 纯 Go pcap v2.4 写入器（Wireshark/tcpdump 直读）
 │   ├── platform/
 │   │   ├── darwin/                      # CoreWLAN 扫描 + reexec（TCC 定位授权 bundle）
 │   │   ├── esp/esp.go                   # 串口帧协议 · 复位时序 · 噪声重同步 · 能力位图
+│   │   ├── lan/                         # 邻居表与默认网关读取（/proc/net/arp · arp -an · arp -a）
+│   │   ├── capture/                     # 抓包源：Linux/Android AF_PACKET · macOS BPF · 无平台错误桩
 │   │   ├── linux/                       # iw 解析 · monitor · AF_PACKET 注入 · Android
 │   │   ├── termux/                      # Android Termux API 适配
-│   │   └── windows/                     # netsh 解析 · Npcap/WlanHelper 注入
+│   │   └── windows/                     # netsh 解析 · Npcap/WlanHelper 注入与抓包
 │   ├── radio/regulatory.go              # 信道合规边界
 │   ├── security/permission.go           # 按 operation 判断权限，不无条件要求 root
 │   └── utilities/                       # argv · logger · platform
@@ -191,7 +210,7 @@ wifisec/
 │   ├── logo.svg                         # 项目 Logo
 │   ├── src/style/ · src/scripts/        # 文档站样式（SCSS 源 + 编译产物）与交互脚本
 │   ├── diagram/                         # PlantUML：执行流程 + 串口协议时序
-│   └── feature/                         # wifi_list / wifi_serial / wifi_deauth / wifi_brute_force 详细文档
+│   └── feature/                         # wifi_list / wifi_serial / wifi_deauth / wifi_brute_force / wifi_clone / lan_analysis 详细文档
 ├── Makefile                             # build / list / test / 等构建编排
 └── .githooks/                           # Conventional Commits 提交信息校验钩子
 ```

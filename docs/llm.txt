@@ -4,7 +4,7 @@
 
 WifiSec（无线安全审计工具）是哪吒网络安全出品的开源 WiFi 渗透测试与口令强度评估框架，采用 Hexagonal Architecture（六边形架构），Go 1.26+ 纯血实现，核心链路零 CGO。它把传统无线审计里最难缠的三件事——**root 权限、monitor 模式驱动、平台差异**——全部下沉到一块约十元的 ESP 开发板上：deauth 帧注入与关联尝试跑在板载射频，宿主机只经 USB 串口收发协议帧。
 
-关键词：WiFi 安全、无线渗透测试、deauth 攻击、802.11 帧注入、WPA2 密码爆破、WiFi brute force、ESP8266、ESP32、无线安全审计、wireless security audit、WiFi pentesting tool、deauthentication、WPA handshake、Termux WiFi 工具、免 root WiFi 破解、红队工具、red team、网络安全、渗透测试框架。
+关键词：WiFi 安全、无线渗透测试、deauth 攻击、802.11 帧注入、WPA2 密码爆破、WiFi brute force、ESP8266、ESP32、无线安全审计、wireless security audit、WiFi pentesting tool、deauthentication、WPA handshake、Termux WiFi 工具、免 root WiFi 破解、红队工具、red team、网络安全、渗透测试框架、Evil Twin、rogue AP、WiFi hotspot clone、hostapd、钓鱼热点检测、局域网设备发现、ARP 邻居表、TCP 端口扫描、nmap connect scan、banner grabbing、抓包、packet capture、pcap、Wireshark、AF_PACKET、BPF、Npcap。
 
 ## 为什么选择 WifiSec
 
@@ -21,6 +21,11 @@ WifiSec（无线安全审计工具）是哪吒网络安全出品的开源 WiFi �
 - `wifisec serial`：USB 串口设备发现，VID:PID 芯片对照（CH340 / CP2102 / FT232 / CH9102），占用进程点名
 - `wifisec deauth <ssid|bssid> [串口]`：对目标持续发送 802.11 deauthentication 帧，同名多 AP 轮流切信道全命中，Ctrl-C 停止并输出统计
 - `wifisec brute <ssid|bssid> with-pass: <字典> [串口]`：在线密码字典爆破，ESP 协处理器与本机网卡双路径，命中即停输出凭证块
+- `wifisec clone <ssid>:<密码> up [nokick] [串口]`：热点克隆（Evil Twin），同名同密码 SoftAP + 默认 200ms 节奏 kick 驱赶真实 AP 客户端，设备接入/离开实时打印；ESP 路径 AP+STA 双模，无设备回落 Linux hostapd（需 root，kick 需第二块网卡）
+- `wifisec clone down [串口]`：停止固件上的克隆热点，恢复 STA 模式
+- `wifisec devices [网卡名]`：局域网设备发现，TCP 探针刷 ARP + 系统邻居表交叉（Linux /proc/net/arp、macOS arp -an、Windows arp -a），输出 IP/MAC/主机名/网关角色，四平台免 root
+- `wifisec scan_ports <目标> [端口规格]`：nmap 风格 TCP connect 扫描（200 并发、1.5s 超时），open/closed/filtered 三态判定 + 被动 banner / HTTP HEAD 抓取，支持 top（47 端口）/all（1-1000）/逗号列表/区间，四平台免 root
+- `wifisec get_packet [网卡] [秒] [文件]`：连接态网卡抓包（Linux/Android AF_PACKET、macOS BPF、Windows Npcap），终端 40 行/秒限速摘要（折叠屏显不丢帧），全帧写纯 Go 手写 pcap（DLT 1），Wireshark/tcpdump 直读，Ctrl-C 收尾
 - `wifisec upgrade`：从 GitHub Releases 下载最新版并原地替换当前二进制
 - `wifisec help`：用法总览（含版本信息，版本与 GitHub Release tag 一致）
 
@@ -40,6 +45,7 @@ go install github.com/ctkqiang/wifisec/cmd/wifisec@latest
 - 串口协议：`[魔数][cmd][len_lo][len_hi][payload]` 小端帧；主机→ESP 魔数 0xA5，ESP→主机 魔数 0x5A
 - 注入原语：`wifi_send_pkt_freedom`（ESP8266）/ `esp_wifi_80211_tx`（ESP32）
 - 关联命令：CMD_ASSOC 0x03，payload 为 ssidLen + ssid + passLen + password，固件侧 12 秒应答窗口
+- 克隆命令：CMD_CLONE 0x05（op + channel + ssidLen + ssid + passLen + password，op 1=up 0=down）与 CMD_CLONE_STATUS 0x06（在线设备 count + MAC 列表），克隆结果回传 result + apMAC
 - 版本注入：ldflags -X BuildVersion（Makefile 构建）→ debug.ReadBuildInfo（go install）→ dev 三级回退
 
 ## 文档
@@ -49,6 +55,8 @@ go install github.com/ctkqiang/wifisec/cmd/wifisec@latest
 - 下载页（GitHub Releases）: https://github.com/ctkqiang/wifisec/releases
 - deauth 帧注入详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_deauth.md
 - brute 密码爆破详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_brute_force.md
+- clone 热点克隆详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_clone.md
+- 局域网分析三件套（devices / scan_ports / get_packet）详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/lan_analysis.md
 - list 无线扫描详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_list.md
 - serial 串口发现详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_serial.md
 - 固件源码: https://github.com/ctkqiang/wifisec/blob/main/core/esp/esp.ino

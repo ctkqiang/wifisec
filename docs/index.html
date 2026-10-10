@@ -70,6 +70,10 @@
           <a href="#cmd-serial">serial · 串口发现</a>
           <a href="#cmd-deauth">deauth · 帧注入</a>
           <a href="#cmd-brute">brute · 密码爆破</a>
+          <a href="#cmd-clone">clone · 热点克隆</a>
+          <a href="#cmd-devices">devices · 设备发现</a>
+          <a href="#cmd-scan">scan_ports · 端口扫描</a>
+          <a href="#cmd-packet">get_packet · 抓包导出</a>
           <a href="#cmd-help">help · 用法总览</a>
         </div>
         <div class="nav-group">
@@ -272,6 +276,103 @@ wifisec brute 01:23:45:67:89:ab pass.txt /dev/cu.usbserial-XXXX  <span class="cm
         <p>macOS 本机路径采用两段式判定：<code>networksetup</code> 返回 0 仅代表 join 请求被受理，还需轮询确认接口真实接入目标 SSID，杜绝假命中。ESP 路径需先烧录含关联命令的固件（协议含 <code>CMD_ASSOC 0x03</code>）。完整说明（协议载荷、BSSID 来源分级、限速对抗、与离线破解的区别）见 <a href="feature/wifi_brute_force.md">wifi_brute_force.md</a>。</p>
       </section>
 
+      <section id="cmd-clone">
+        <h2>clone · 热点克隆<a class="anchor" href="#cmd-clone">#</a></h2>
+        <p>Evil Twin：在真实 AP 的信道上承载一个<strong>同名同密码的克隆热点</strong>，默认开启 kick——每 200ms 对真实 AP 广播 deauth，把其客户端驱赶到克隆网络；客户端接入/离开实时打印，Ctrl-C 结束并输出会话统计。插入 ESP 时克隆 AP 与 kick 帧都由板载射频承载（固件切 AP+STA 双模）；未检测到设备时回落本机路径——仅 Linux 可行（hostapd，需 root），且 kick 需要第二块无线网卡。</p>
+        <pre><code class="lang-bash">wifisec clone <span class="str">'MyWiFi'</span>:<span class="str">'same-password'</span> up          <span class="cmt"># 同名同密码克隆 + kick 真实 AP</span>
+wifisec clone <span class="str">'MyWiFi'</span>: up nokick                    <span class="cmt"># 开放网络克隆，不驱赶客户端</span>
+wifisec clone down                                   <span class="cmt"># 停止固件上的克隆热点</span></code></pre>
+        <pre><code class="lang-text">════════════ 克隆热点已上线 ════════════
+  SSID      : MyWiFi
+  密码      : same-password
+  信道      : 6
+  克隆 BSSID: 1a:2b:3c:4d:5e:6f
+  真实 AP   : aa:bb:cc:dd:ee:ff（信道 6）
+  kick      : 已启用（每 200ms 广播 deauth 驱赶真实 AP 客户端）
+  监控      : 客户端接入/离开将实时打印，Ctrl-C 结束会话
+═══════════════════════════════════════
+
+[信息] 客户端接入 8c:85:90:xx:xx:xx（在线 1 台）</code></pre>
+        <p>启动时先扫描周边网络，同名 SSID 取 <strong>RSSI 最强</strong>者作为克隆参照（信道跟随它、kick 指向它）；扫不到同名网络时信道回落 6、kick 自动禁用。凭据约束：SSID 1-32 字节，WPA2 密码 8-63 字节，密码留空即开放网络。协议新增 <code>CMD_CLONE 0x05</code>（op+channel+ssid+password）与 <code>CMD_CLONE_STATUS 0x06</code>（在线设备列表轮询差分），旧固件回错误码 255 时需重烧固件。</p>
+        <div class="alert danger">
+          <span class="alert-icon">⚠</span>
+          <div>克隆热点 + kick 是对目标网络的主动干扰行为，未经许可克隆他人网络并截获流量违反《刑法》第二百八十五条。<strong>仅限自有网络或已获书面授权的测试环境。</strong></div>
+        </div>
+        <p>完整说明（双路径执行顺序、hostapd 配置生成、kick 机制、企业级 WPA-EAP 边界、排错表）见 <a href="feature/wifi_clone.md">wifi_clone.md</a>。</p>
+      </section>
+
+      <section id="cmd-devices">
+        <h2>devices · 局域网设备发现<a class="anchor" href="#cmd-devices">#</a></h2>
+        <p>盘点当前 Wi-Fi 里的在线设备：自动选出默认路由网卡（UDP connect 技巧），对网段内每个地址的 <code>80/443/22/445</code> 做 700ms 超时的 TCP 探针（128 并发）强制内核刷新 ARP 表，再读系统邻居表交叉得出 IP/MAC，补反向 DNS 与本机/网关角色。<strong>四平台免 root</strong>：Linux/Android 读 <code>/proc/net/arp</code>，macOS 解析 <code>arp -an</code>，Windows 解析 <code>arp -a</code>。</p>
+        <pre><code class="lang-bash">wifisec devices                 <span class="cmt"># 自动选择当前上网网卡</span>
+wifisec devices en0             <span class="cmt"># 显式指定网卡（全隧道 VPN 时需要）</span></code></pre>
+        <pre><code class="lang-log">[信息] 接口 en0 · 本机 192.168.1.109 · 网段 192.168.1.109/24
+[信息] 默认网关 192.168.1.1
+[信息] 正在并发探测 253 个地址的 80,443,22,445 端口以刷新 ARP 表…
+
+局域网在线设备（数据来源：系统 ARP 邻居表）
+IP 地址        MAC 地址           主机名    角色
+────────────────────────────────────────────────
+192.168.1.1    B4:B0:24:xx:xx:xx  -         网关
+192.168.1.46   76:A2:36:xx:xx:xx  -         -
+192.168.1.109  12:49:1B:xx:xx:xx  M2.local  本机
+[信息] 共 5 台设备 · 探测地址 253 个 · 耗时 5.68s</code></pre>
+        <div class="alert info">
+          <span class="alert-icon">ⓘ</span>
+          <div>ARP 表是惰性缓存，所以必须先探测；熄屏省电的手机不回 ARP，<strong>未出现不代表离线</strong>。只覆盖 IPv4 直连网段，<code>/16</code> 以上大网段自动退化为本机所在 <code>/24</code>；AP 隔离（客户端隔离）开启时任何二层工具都看不到邻居。</div>
+        </div>
+        <p>完整原理与跨平台实现见 <a href="feature/lan_analysis.md">lan_analysis.md §2</a>。</p>
+      </section>
+
+      <section id="cmd-scan">
+        <h2>scan_ports · 端口扫描<a class="anchor" href="#cmd-scan">#</a></h2>
+        <p>对标 <code>nmap -sT</code> 的 TCP connect 扫描：握手由内核完成，<strong>四平台免 root</strong>，同时给出精确三态——握上是 <code>open</code>、收到 RST 是 <code>closed</code>、超时/不可达是 <code>filtered</code>。200 并发、单端口 1.5s；open 端口再做被动 banner 抓取（HTTP 族端口补发 <code>HEAD / HTTP/1.0</code>）。</p>
+        <pre><code class="lang-bash">wifisec scan_ports 192.168.1.1                 <span class="cmt"># 默认 47 个常用端口（top）</span>
+wifisec scan_ports 192.168.1.1 all             <span class="cmt"># 1-1000</span>
+wifisec scan_ports 192.168.1.46 22,80,8000-8100  <span class="cmt"># 列表与区间混用</span></code></pre>
+        <pre><code class="lang-log">端口扫描结果 · 192.168.1.1（192.168.1.1）
+端口  状态  服务    Banner
+────────────────────────────────────────────
+22    open  ssh     SSH-2.0-dropbear_2011.54
+53    open  domain  -
+80    open  http    HTTP/1.0 200 OK
+443   open  https   -
+[信息] open 4 · filtered 0 · closed 1 · 共 5 端口 · 耗时 1.01s</code></pre>
+        <div class="alert warning">
+          <span class="alert-icon">⚠</span>
+          <div>connect 扫描在对端日志里就是一次真实连接，<strong>没有隐蔽性</strong>；只支持 TCP（无 UDP / SYN 半开扫描）。filtered 也可能只是主机不在线，先用 <code>devices</code> 确认。</div>
+        </div>
+        <p>三态判定、banner 机制与能力边界见 <a href="feature/lan_analysis.md">lan_analysis.md §3</a>。</p>
+      </section>
+
+      <section id="cmd-packet">
+        <h2>get_packet · 抓包导出<a class="anchor" href="#cmd-packet">#</a></h2>
+        <p>在<strong>连接态</strong>网卡上抓包导出 pcap，Wireshark/tcpdump 可直接打开。实时行按 Wireshark 列表风格限速 40 行/秒打印（超出只折叠屏幕行，帧数据一个不落全入文件），每 5 秒一行进度，Ctrl-C 或秒数到点后写统计正常收尾。参数按 token 形态归类、顺序随意：纯整数=秒数，带路径分隔符或 <code>.pcap/.cap</code> 后缀=文件，其余=网卡名。</p>
+        <pre><code class="lang-bash">wifisec get_packet en0 30 capture.pcap   <span class="cmt"># en0 抓 30 秒落盘</span>
+wifisec get_packet 10                   <span class="cmt"># 默认无线网卡抓 10 秒，文件名自动生成</span>
+wifisec get_packet                      <span class="cmt"># 默认网卡抓到 Ctrl-C</span></code></pre>
+        <pre><code class="lang-log">[信息] #154    192.168.1.66:51752 → 192.168.1.255:5700  UDP (211 B)
+[信息] 抓包结束：154 帧 · 52.0 KB · 时长 3.06s
+协议分布：TCP 148 · UDP 6
+文件：out.pcap（54.5 KB）
+Wireshark 打开方式：File → Open → 选择该文件</code></pre>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>平台</th><th>抓包数据源</th><th>特权</th></tr></thead>
+            <tbody>
+              <tr><td>Linux/Android</td><td><code>AF_PACKET</code> 原始套接字</td><td>root / <code>CAP_NET_RAW</code></td></tr>
+              <tr><td>macOS</td><td><code>/dev/bpf*</code>（BIOC 系列 ioctl）</td><td>sudo 或 <code>access_bpf</code> 组</td></tr>
+              <tr><td>Windows</td><td>Npcap <code>wpcap.dll</code></td><td>安装 Npcap + 管理员终端</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="alert info">
+          <span class="alert-icon">ⓘ</span>
+          <div>抓的是<strong>本机内核视角的以太网帧（DLT 1）</strong>：看得到本机单播与全网/组播，看不到另外两台设备之间的单播（AP 不转发），HTTPS 仍是 TLS 密文。不切 monitor、不断 Wi-Fi；裸 802.11 管理帧属于 ESP 协处理器的 deauth 路线。</div>
+        </div>
+        <p>pcap 格式细节、BPF 配置顺序与排错见 <a href="feature/lan_analysis.md">lan_analysis.md §4-§6</a>。</p>
+      </section>
+
       <section id="cmd-help">
         <h2>help · 用法总览<a class="anchor" href="#cmd-help">#</a></h2>
         <p>裸跑 <code>wifisec</code>（无子命令）或 <code>wifisec help</code> 均输出开发者信息与全部子命令用法。</p>
@@ -321,6 +422,10 @@ arduino-cli upload --fqbn esp8266:esp8266:nodemcuv2 \
               <tr><td><code>0x03</code></td><td>主机→ESP</td><td>关联尝试</td><td>ssidLen(1) + ssid + passLen(1) + password</td></tr>
               <tr><td><code>0x03</code></td><td>ESP→主机</td><td>关联结果</td><td>result(1)：0 = 失败/超时，1 = 成功</td></tr>
               <tr><td><code>0x04</code></td><td>ESP→主机</td><td>错误</td><td>出错命令(1) + 错误码(1)</td></tr>
+              <tr><td><code>0x05</code></td><td>主机→ESP</td><td>克隆开关</td><td>op(1) + channel(1) + ssidLen(1) + ssid + passLen(1) + password</td></tr>
+              <tr><td><code>0x05</code></td><td>ESP→主机</td><td>克隆结果</td><td>result(1) + apMAC(6)；down 回复 MAC 全零</td></tr>
+              <tr><td><code>0x06</code></td><td>主机→ESP</td><td>克隆状态</td><td>无</td></tr>
+              <tr><td><code>0x06</code></td><td>ESP→主机</td><td>在线设备</td><td>count(1) + count×MAC(6)</td></tr>
             </tbody>
           </table>
         </div>
