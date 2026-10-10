@@ -14,12 +14,16 @@ import (
 var (
 	defaultMinLevel = constants.LevelInfo
 	commandHandlers = map[string]utilities.CommandFunction{
-		"deauth":  functions.WifiDeauther,
-		"list":    functions.WifiList,
-		"serial":  functions.Serial,
-		"brute":   functions.BruteForceConnectToWiFi,
-		"upgrade": functions.SelfUpgrade,
-		"help":    functions.HelpUsage,
+		"deauth":     functions.WifiDeauther,
+		"list":       functions.WifiList,
+		"serial":     functions.Serial,
+		"brute":      functions.BruteForceConnectToWiFi,
+		"clone":      functions.WifiClone,
+		"upgrade":    functions.SelfUpgrade,
+		"devices":    functions.GetAllDeviceInThisWifi,
+		"scan_ports": functions.CheckPort,
+		"get_packet": functions.GetPacket,
+		"help":       functions.HelpUsage,
 	}
 )
 
