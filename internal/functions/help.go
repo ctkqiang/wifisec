@@ -70,11 +70,12 @@ var helpGroups = []helpGroup{
 	},
 	{
 		Title: "局域网分析",
-		Note:  "本机直连视角，四平台免 root",
+		Note:  "本机直连视角；sniff 需 root/管理员",
 		Commands: []helpCommand{
 			{Signature: "devices [网卡名]", Summary: "发现局域网在线设备（IP/MAC/主机名/网关角色）"},
+			{Signature: "sniff [--spoof] [--targets ip1,ip2] [--iface 网卡]", Summary: "实时嗅探 + 应用层标注；--spoof 叠加 ARP 欺骗 MITM，退出自动还原"},
 			{Signature: "scan_ports <目标> [端口]", Summary: "nmap 风格 TCP 扫描：open/closed/filtered + banner"},
-			{Signature: "agent [--port N] [--token 令牌]", Summary: "被控端：启动横向移动 agent，等待控制端接入"},
+			{Signature: "bind [--port N] [--token 令牌]", Summary: "被控端：bind shell 监听，等待控制端接入"},
 			{Signature: "shell <ip> [命令] [--token 令牌]", Summary: "控制端：shell <ip> bash 交互会话；wifisec <ip> <命令> 一步执行"},
 			{Signature: "get_packet [网卡] [秒] [文件] [--eapol] [--pmkid --bssid xx] [--ssid 名称]", Summary: "连接态抓包导出 pcap；--eapol 实时分析握手，--pmkid 主动会话与抓包共存"},
 			{Signature: "extract <capture.pcap> [--hashcat out.22000] [--pmkid out.16800] [--bssid xx] [--ssid 名称] [--json]", Summary: "离线分析 pcap：握手数/PMKID/帧合法性，择优导出 hash 行"},
@@ -98,10 +99,12 @@ var helpExamples = []helpExample{
 	{Command: "wifisec jam all", Comment: "全频段：所有可见 AP 逐个打击"},
 	{Command: "wifisec brute 'MyWiFi' with-pass: pass.txt", Comment: "字典爆破，命中即停"},
 	{Command: "wifisec clone 'MyWiFi':'same-password' up", Comment: "克隆热点并 kick 真实 AP"},
-	{Command: "wifisec agent --token lab2026", Comment: "被控端：等待横向移动控制端接入"},
+	{Command: "wifisec bind --token lab2026", Comment: "被控端：bind shell 等待控制端接入"},
 	{Command: "wifisec 192.168.1.123 bash --token lab2026", Comment: "横向移动：IP 开头自动路由进交互 shell"},
 	{Command: "wifisec 192.168.1.123 whoami", Comment: "单命令一步执行，远端退出码映射本地"},
 	{Command: "wifisec devices", Comment: "局域网在线设备"},
+	{Command: "wifisec sniff", Comment: "被动嗅探：本机流量 + ARP/DHCP 广播"},
+	{Command: "wifisec sniff --spoof --targets 192.168.1.66", Comment: "ARP 欺骗 MITM，观测目标流量"},
 	{Command: "wifisec scan_ports 192.168.1.1 22,80,8000-8100", Comment: "自定义端口规格"},
 	{Command: "wifisec get_packet en0 30 capture.pcap", Comment: "抓 30 秒并落盘"},
 	{Command: "wifisec get_packet --eapol --ssid 'MyWiFi' 60 eapol.pcap", Comment: "连接态抓包并实时分析握手"},
@@ -119,7 +122,8 @@ var helpDocs = []helpDoc{
 	{Path: "docs/feature/wireless_ids.md", Summary: "无线 IDS 检测器与阈值判读"},
 	{Path: "docs/feature/wifi_pmkid.md", Summary: "PMKID 主动获取与 pcap 离线提取"},
 	{Path: "docs/feature/wifi_jam.md", Summary: "jam 全频段干扰器：双帧 + all 模式"},
-	{Path: "docs/feature/lateral_movement.md", Summary: "横向移动：agent/shell 与授权边界"},
+	{Path: "docs/feature/wifi_sniff.md", Summary: "实时嗅探与 ARP 欺骗 MITM"},
+	{Path: "docs/feature/lateral_movement.md", Summary: "横向移动：bind/shell 与授权边界"},
 	{Path: "https://www.ctkqiang.xin/wifisec", Summary: "在线文档站"},
 }
 

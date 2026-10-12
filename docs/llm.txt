@@ -4,7 +4,7 @@
 
 WifiSec（无线安全审计工具）是哪吒网络安全出品的开源 WiFi 渗透测试与口令强度评估框架，采用 Hexagonal Architecture（六边形架构），Go 1.26+ 纯血实现，核心链路零 CGO。它把传统无线审计里最难缠的三件事——**root 权限、monitor 模式驱动、平台差异**——全部下沉到一块约十元的 ESP 开发板上：deauth 帧注入与关联尝试跑在板载射频，宿主机只经 USB 串口收发协议帧。
 
-关键词：WiFi 安全、无线渗透测试、deauth 攻击、802.11 帧注入、WiFi 干扰、jammer、disassociation、disassoc、全频段干扰、WPA2 密码爆破、WiFi brute force、ESP8266、ESP32、无线安全审计、wireless security audit、WiFi pentesting tool、deauthentication、WPA handshake、PMKID、PMKID attack、hashcat 22000、hashcat 16800、RSN IE、EAPOL-Key、M1-M4 握手配对、WPA handshake 离线爆破、免客户端破解、clientless attack、802.11w PMF、Termux WiFi 工具、免 root WiFi 破解、红队工具、red team、网络安全、渗透测试框架、Evil Twin、rogue AP、WiFi hotspot clone、hostapd、钓鱼热点检测、局域网设备发现、ARP 邻居表、TCP 端口扫描、nmap connect scan、banner grabbing、抓包、packet capture、pcap、Wireshark、AF_PACKET、BPF、Npcap、pcap 离线分析、无线入侵检测、wireless IDS、WIDS、rogue AP detection、KARMA attack、beacon flood、deauth flood detection、evil twin detection、加密降级检测、WEP crack detection、open WiFi audit、企业无线安全、wireless monitoring、WPA3、802.11w PMF、WiFi 热力图、wifi heatmap、信号热力图、site survey、站点勘测、RSSI 可视化、signal strength map、IDW 插值、inverse distance weighting、AP 定位、覆盖死角、dead zone、TUI、terminal UI、平面图勘测、横向移动、lateral movement、client-to-client attack、remote shell、bind shell、C2、command and control、post-exploitation、后渗透、内网横向、HMAC 挑战应答。
+关键词：WiFi 安全、无线渗透测试、deauth 攻击、802.11 帧注入、WiFi 干扰、jammer、disassociation、disassoc、全频段干扰、WPA2 密码爆破、WiFi brute force、ESP8266、ESP32、无线安全审计、wireless security audit、WiFi pentesting tool、deauthentication、WPA handshake、PMKID、PMKID attack、hashcat 22000、hashcat 16800、RSN IE、EAPOL-Key、M1-M4 握手配对、WPA handshake 离线爆破、免客户端破解、clientless attack、802.11w PMF、Termux WiFi 工具、免 root WiFi 破解、红队工具、red team、网络安全、渗透测试框架、Evil Twin、rogue AP、WiFi hotspot clone、hostapd、钓鱼热点检测、局域网设备发现、ARP 邻居表、TCP 端口扫描、nmap connect scan、banner grabbing、抓包、packet capture、pcap、Wireshark、AF_PACKET、BPF、Npcap、pcap 离线分析、实时嗅探、packet sniffing、bettercap、ARP 欺骗、ARP spoofing、MITM、中间人攻击、man in the middle、net.spoof、DNS 嗅探、TLS SNI、HTTP Host、流量观测、无线入侵检测、wireless IDS、WIDS、rogue AP detection、KARMA attack、beacon flood、deauth flood detection、evil twin detection、加密降级检测、WEP crack detection、open WiFi audit、企业无线安全、wireless monitoring、WPA3、802.11w PMF、WiFi 热力图、wifi heatmap、信号热力图、site survey、站点勘测、RSSI 可视化、signal strength map、IDW 插值、inverse distance weighting、AP 定位、覆盖死角、dead zone、TUI、terminal UI、平面图勘测、横向移动、lateral movement、client-to-client attack、remote shell、bind shell、C2、command and control、post-exploitation、后渗透、内网横向、HMAC 挑战应答。
 
 ## 为什么选择 WifiSec
 
@@ -25,8 +25,9 @@ WifiSec（无线安全审计工具）是哪吒网络安全出品的开源 WiFi �
 - `wifisec clone <ssid>:<密码> up [nokick] [串口]`：热点克隆（Evil Twin），同名同密码 SoftAP + 默认 200ms 节奏 kick 驱赶真实 AP 客户端，设备接入/离开实时打印；ESP 路径 AP+STA 双模，无设备回落 Linux hostapd（需 root，kick 需第二块网卡）
 - `wifisec clone down [串口]`：停止固件上的克隆热点，恢复 STA 模式
 - `wifisec devices [网卡名]`：局域网设备发现，TCP 探针刷 ARP + 系统邻居表交叉（Linux /proc/net/arp、macOS arp -an、Windows arp -a），输出 IP/MAC/主机名/网关角色，四平台免 root
+- `wifisec sniff [--spoof] [--targets ip1,ip2] [--iface 网卡]`：bettercap 风格实时嗅探（Linux AF_PACKET、macOS BPF、Windows Npcap，需 root/管理员）——被动模式直读网卡帧，DNS 查询 / HTTP 请求 / TLS SNI 实时标注 + 40 行/秒限速 + 协议分布统计；`--spoof` 叠加 ARP 欺骗 MITM：双向 1s 毒化 + who-has 即时应答 + IP 转发与 ICMP redirect 压制（Linux procfs / macOS sysctl），退出时按启动前备份以真实 MAC 重发 5 轮恢复帧完整还原；Windows 欺骗因 IPEnableRouter 无法即开即还而明确拒绝，被动嗅探不受影响
 - `wifisec scan_ports <目标> [端口规格]`：nmap 风格 TCP connect 扫描（200 并发、1.5s 超时），open/closed/filtered 三态判定 + 被动 banner / HTTP HEAD 抓取，支持 top（47 端口）/all（1-1000）/逗号列表/区间，四平台免 root
-- `wifisec agent [--port N] [--token 令牌] [--timeout 秒]`：横向移动被控端——监听 TCP，HMAC-SHA256 挑战应答认证（令牌不落网），空令牌自动生成随机令牌并打印；命令经 /bin/sh -c（Windows cmd /C）解释，stdout/stderr 实时回传，超时击杀回退出码 124
+- `wifisec bind [--port N] [--token 令牌] [--timeout 秒]`：横向移动被控端——bind shell 监听 TCP，HMAC-SHA256 挑战应答认证（令牌不落网），空令牌自动生成随机令牌并打印；命令经 /bin/sh -c（Windows cmd /C）解释，stdout/stderr 实时回传，超时击杀回退出码 124
 - `wifisec <ip> bash [--token 令牌]`：横向移动控制端——IP 开头自动路由进交互 shell（等价 `shell <ip> bash`），`wifisec <ip> <命令>` 单命令一步执行且远端退出码映射本地；令牌亦可经 WIFISEC_TOKEN 环境变量传递
 - `wifisec get_packet [网卡] [秒] [文件]`：连接态网卡抓包（Linux/Android AF_PACKET、macOS BPF、Windows Npcap），终端 40 行/秒限速摘要（折叠屏显不丢帧），全帧写纯 Go 手写 pcap（DLT 1），Wireshark/tcpdump 直读，Ctrl-C 收尾；`--eapol` 实时分析 EAPOL 握手并按 `--bssid`/`--ssid` 过滤，`--pmkid` 主动会话与抓包共存（Linux/Windows）
 - `wifisec pmkid <ssid|bssid> [网卡] [-o out.22000] [--ssid 名称] [--attempts N] [--json]`：PMKID 主动获取——假客户端发 Auth+Assoc，从 RSN IE 抽 PMKID，免客户端、免踢人、不怕 802.11w；AKM 非 PSK 明确拒绝，随机 STA MAC 重试退避，产出 hashcat 22000 行
@@ -62,10 +63,11 @@ go install github.com/ctkqiang/wifisec/cmd/wifisec@latest
 - 下载页（GitHub Releases）: https://github.com/ctkqiang/wifisec/releases
 - deauth 帧注入详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_deauth.md
 - jam 全频段干扰详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_jam.md
-- 横向移动（agent/shell）详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/lateral_movement.md
+- 横向移动（bind/shell）详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/lateral_movement.md
 - brute 密码爆破详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_brute_force.md
 - clone 热点克隆详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_clone.md
 - 局域网分析三件套（devices / scan_ports / get_packet）详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/lan_analysis.md
+- 实时嗅探与 ARP 欺骗 MITM（sniff）详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_sniff.md
 - 无线入侵检测（ids）详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wireless_ids.md
 - PMKID 主动获取与 pcap 离线提取（pmkid / extract）详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_pmkid.md
 - 信号热力图（heatmap）详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_heatmap.md
@@ -76,7 +78,7 @@ go install github.com/ctkqiang/wifisec/cmd/wifisec@latest
 
 ## 法律声明
 
-仅限自有网络或已获书面授权的测试环境使用。《中华人民共和国网络安全法》第二十七条明确禁止非法侵入他人网络、干扰他人网络正常功能；对他人无线网络实施 deauth 干扰或在线爆破，可能同时触犯《中华人民共和国刑法》第二百八十五条第三款（提供侵入、非法控制计算机信息系统程序、工具罪）与第二百八十六条（破坏计算机信息系统罪）。自用路由器验证口令强度是合法典型场景；对任何第三方 AP 使用即越线，后果由使用者自行承担。
+仅限自有网络或已获书面授权的测试环境使用。《中华人民共和国网络安全法》第二十七条明确禁止非法侵入他人网络、干扰他人网络正常功能；对他人无线网络实施 deauth 干扰或在线爆破，可能同时触犯《中华人民共和国刑法》第二百八十五条第三款（提供侵入、非法控制计算机信息系统程序、工具罪）与第二百八十六条（破坏计算机信息系统罪）；`sniff --spoof` 的 ARP 欺骗会实时截获他人通信内容，未经授权对他人设备实施即构成实时窃听，可能触犯第二百八十五条第二款（非法获取计算机信息系统数据罪）。自用路由器验证口令强度是合法典型场景；对任何第三方 AP 使用即越线，后果由使用者自行承担。
 
 ## 作者
 

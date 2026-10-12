@@ -28,7 +28,8 @@ var (
 		"ids":        functions.RunWirelessIDS,
 		"heatmap":    functions.RunHeatmap,
 		"jam":        functions.RunJammer,
-		"agent":      functions.RunAgent,
+		"sniff":      functions.RunSniff,
+		"bind":       functions.RunBind,
 		"shell":      functions.RunShellClient,
 		"help":       functions.HelpUsage,
 	}

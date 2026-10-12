@@ -35,6 +35,7 @@ type FrameSummary struct {
 	Src    string // 源端点（IP:端口，无端口协议退化为 IP，再退化为 MAC）
 	Dst    string // 目的端点
 	Info   string // Wireshark Info 列风格的补充说明，如 ARP who-has / TCP SYN
+	L7     string // 应用层命中标签（dns/http/sni），由 SummarizeWithL7 回填
 	Length int    // 实际捕获长度
 }
 

