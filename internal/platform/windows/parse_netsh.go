@@ -15,6 +15,15 @@ var (
 	driverPattern = regexp.MustCompile(`(?m)^\s*(?:Driver|驱动程序)\s*:\s*(.+)$`)
 )
 
+// interfaceEntry 是 netsh 接口输出中的一个适配器中间结构。
+type interfaceEntry struct {
+	Name        string
+	Description string
+	GUID        string
+	MAC         string
+	State       string
+}
+
 // ParseNetworks 解析 `netsh wlan show networks mode=bssid` 文本。
 // SSID 段头位于行首、认证/加密缩进 4 列、BSSID 及其属性缩进更深，
 // 利用缩进层级把每个 BSSID 拆成独立一行（同名 2.4G/5G 不会合并）。
@@ -98,15 +107,6 @@ func ParseConnectedBSSID(output string) string {
 	}
 
 	return ""
-}
-
-// interfaceEntry 是 netsh 接口输出中的一个适配器中间结构。
-type interfaceEntry struct {
-	Name        string
-	Description string
-	GUID        string
-	MAC         string
-	State       string
 }
 
 // ParseInterfaces 按空行分块解析 `netsh wlan show interfaces` 的“键 : 值”行。

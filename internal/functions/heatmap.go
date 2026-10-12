@@ -53,6 +53,21 @@ type HeatmapOptions struct {
 	PlanPath string // 可选 ASCII 平面图文件
 }
 
+// heatSession 是一次 TUI 勘测会话的全部可变状态。
+type heatSession struct {
+	surveys  map[string]*heatmap.Survey // target key → 独立网格
+	targets  []heatTarget
+	current  int // 当前目标下标
+	cursorX  int
+	cursorY  int
+	gridCols int
+	gridRows int
+	termCols int
+	termRows int
+	status   string
+	plan     []string
+}
+
 // ParseHeatmapArgs 按位置语义解析：存在的文件路径是平面图，
 // 其余首个 token 是目标 SSID；多余 token 报错。
 func ParseHeatmapArgs(arguments []string) (HeatmapOptions, error) {
@@ -89,21 +104,6 @@ func ParseHeatmapArgs(arguments []string) (HeatmapOptions, error) {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular()
-}
-
-// heatSession 是一次 TUI 勘测会话的全部可变状态。
-type heatSession struct {
-	surveys  map[string]*heatmap.Survey // target key → 独立网格
-	targets  []heatTarget
-	current  int // 当前目标下标
-	cursorX  int
-	cursorY  int
-	gridCols int
-	gridRows int
-	termCols int
-	termRows int
-	status   string
-	plan     []string
 }
 
 // RunHeatmap 是 `wifisec heatmap` 的入口。

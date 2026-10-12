@@ -5,10 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ctkqiang/wifisec/internal/constants"
-	platformlinux "github.com/ctkqiang/wifisec/internal/platform/linux"
-	platformwindows "github.com/ctkqiang/wifisec/internal/platform/windows"
-	"github.com/ctkqiang/wifisec/internal/utilities"
 	"net"
 	"os"
 	"os/exec"
@@ -18,6 +14,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ctkqiang/wifisec/internal/constants"
+	platformlinux "github.com/ctkqiang/wifisec/internal/platform/linux"
+	platformwindows "github.com/ctkqiang/wifisec/internal/platform/windows"
+	"github.com/ctkqiang/wifisec/internal/utilities"
 )
 
 const (
@@ -213,6 +214,11 @@ var networkColumns = []tableColumn[WiFiNetwork]{
 		Priority: 3,
 	},
 }
+
+var (
+	macProfileOnce sync.Once
+	macProfileText string
+)
 
 // hardwarePort 是 networksetup 输出的一个硬件端口。
 type hardwarePort struct {
@@ -766,11 +772,6 @@ func isWirelessPort(port string) bool {
 
 	return strings.Contains(port, "wi-fi") || strings.Contains(port, "airport")
 }
-
-var (
-	macProfileOnce sync.Once
-	macProfileText string
-)
 
 // macOSProfile 读取 system_profiler 的无线信息，整个进程只执行一次。
 // 强制 LC_ALL=C 固定英文标签，否则系统语言变化会破坏解析。

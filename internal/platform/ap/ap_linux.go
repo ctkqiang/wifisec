@@ -45,6 +45,13 @@ type Host struct {
 	downOnce   sync.Once
 }
 
+// monitorKicker 把第二块网卡的 monitor 接口包装为 KickInjector；
+// SetChannel 走 iw 原生命令（iw dev <name> set channel），因此持有接口名。
+type monitorKicker struct {
+	injector *platformlinux.FrameInjector
+	monitor  string
+}
+
 // New 校验运行环境并选定承载克隆 AP 的无线接口。
 // hostapd 配置接口与运行 AP 模式都需要 root；接口从 sysfs 枚举结果中
 // 取第一块，优先 managed 模式（iw 缺失时 Mode 为空，同样接受）。
@@ -314,13 +321,6 @@ func (h *Host) apMAC() string {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
-}
-
-// monitorKicker 把第二块网卡的 monitor 接口包装为 KickInjector；
-// SetChannel 走 iw 原生命令（iw dev <name> set channel），因此持有接口名。
-type monitorKicker struct {
-	injector *platformlinux.FrameInjector
-	monitor  string
 }
 
 func (m *monitorKicker) Write(frame []byte) error {

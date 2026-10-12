@@ -7,6 +7,12 @@ import (
 	"time"
 )
 
+type commandError struct {
+	name   string
+	output string
+	cause  error
+}
+
 // run 以参数列表执行外部命令并返回标准输出，禁止经过 shell 解释。
 // netsh 的错误提示同样走 stdout/混合输出，合并后便于上层呈现。
 func run(timeout time.Duration, name string, args ...string) (string, error) {
@@ -19,12 +25,6 @@ func run(timeout time.Duration, name string, args ...string) (string, error) {
 	}
 
 	return string(output), nil
-}
-
-type commandError struct {
-	name   string
-	output string
-	cause  error
 }
 
 func (e *commandError) Error() string {

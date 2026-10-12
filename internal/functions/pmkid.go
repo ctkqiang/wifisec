@@ -97,6 +97,16 @@ type pmkidJSONResult struct {
 	Hashcat22000  string `json:"hashcat_22000,omitempty"`
 }
 
+// pmkidTeeReader 把帧流一分为二：进 pmkid 状态机前先落 pcap 并喂
+// EAPOL 分析器，让"主动获取"与抓包证据共存于一次 monitor 会话。
+// 落盘失败只告警不中断——证据文件残缺好过攻击会话报废。
+type pmkidTeeReader struct {
+	inner    platformcapture.Source
+	writer   *pcapfile.Writer
+	analyzer *eapol.Analyzer
+	frames   int
+}
+
 // RunPMKID 是 `wifisec pmkid` 的入口。
 func RunPMKID(arguments []string) error {
 	options, err := ParsePMKIDArgs(arguments)
@@ -409,16 +419,6 @@ func runPMKIDClient(
 	}
 
 	return reportPMKIDResult(result, options)
-}
-
-// pmkidTeeReader 把帧流一分为二：进 pmkid 状态机前先落 pcap 并喂
-// EAPOL 分析器，让"主动获取"与抓包证据共存于一次 monitor 会话。
-// 落盘失败只告警不中断——证据文件残缺好过攻击会话报废。
-type pmkidTeeReader struct {
-	inner    platformcapture.Source
-	writer   *pcapfile.Writer
-	analyzer *eapol.Analyzer
-	frames   int
 }
 
 // Read 实现 pmkid.FrameReader：读到的帧先复制落盘（WritePacket 内部

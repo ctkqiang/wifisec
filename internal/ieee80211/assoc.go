@@ -68,9 +68,37 @@ const (
 // Privacy 置位声明"需要加密"，AP 才会对该 STA 启动 4-way 握手。
 const associationCapability = 0x0431
 
+// radiotapChannelField 是字段 3（Channel）在布局表中的位号。
+const radiotapChannelField = 3
+
 // supportedRates 是 802.11b/g 速率集（1/2/5.5/11 为 basic，加 6/9/12/18）。
 // 高位 0x80 即 basic 标记；缺失该 IE 的关联请求会被多数 AP 直接拒绝。
 var supportedRates = []byte{0x82, 0x84, 0x8b, 0x96, 0x0c, 0x12, 0x18, 0x24}
+
+// radiotapFieldLayout 描述 radiotap 字段 0-5 的载荷长度与自然对齐。
+// 按位号升序解析，拿到字段 5（信号强度）即返回，更高位字段
+// （MCS/VHT/timestamp 等变长字段）不参与 RSSI 的对齐计算。
+var radiotapFieldLayout = [...]struct {
+	size  int
+	align int
+}{
+	{8, 8}, // 0 TSFT（u64，微秒计时器）
+	{1, 1}, // 1 Flags
+	{1, 1}, // 2 Rate
+	{4, 2}, // 3 Channel（u16 频率 MHz + u16 标志）
+	{2, 2}, // 4 FHSS
+	{1, 1}, // 5 dBm Antenna Signal（s8，负值）
+}
+
+// DataFrameInfo 是一帧数据帧的摘录：收发双方与 LLC/SNAP 解出的载荷。
+// 802.11 规范恒定 addr1 = RA（接收方）、addr2 = TA（发送方），
+// 与 toDS/fromDS 组合无关，收发双方永远可从固定偏移读取。
+type DataFrameInfo struct {
+	Receiver    net.HardwareAddr // addr1：接收方（RA）
+	Transmitter net.HardwareAddr // addr2：发送方（TA）
+	EtherType   uint16           // SNAP 解出的 EtherType；非 SNAP 封装为 0
+	Payload     []byte           // EtherType 之后的字节（如 EAPOL 包体）
+}
 
 // BuildAuthenticationFrame 构造 Open System 认证帧（事务序号 1），
 // PMKID 攻击第 1 步：向目标 AP 声明"我要认证"。
@@ -260,16 +288,6 @@ func FindElementInIEs(ies []byte, elementID byte) ([]byte, bool) {
 	return nil, false
 }
 
-// DataFrameInfo 是一帧数据帧的摘录：收发双方与 LLC/SNAP 解出的载荷。
-// 802.11 规范恒定 addr1 = RA（接收方）、addr2 = TA（发送方），
-// 与 toDS/fromDS 组合无关，收发双方永远可从固定偏移读取。
-type DataFrameInfo struct {
-	Receiver    net.HardwareAddr // addr1：接收方（RA）
-	Transmitter net.HardwareAddr // addr2：发送方（TA）
-	EtherType   uint16           // SNAP 解出的 EtherType；非 SNAP 封装为 0
-	Payload     []byte           // EtherType 之后的字节（如 EAPOL 包体）
-}
-
 // ParseData 解析 802.11 数据帧（type=10），剥出 LLC/SNAP 载荷。
 // WDS 4 地址帧与 QoS 数据帧的 MAC 头长度差异在此处理；
 // 空数据帧（QoS Null/CF-ACK 等，无 LLC）返回长度错误，调用方忽略即可。
@@ -313,24 +331,6 @@ func ParseData(frame []byte) (DataFrameInfo, error) {
 
 	return info, nil
 }
-
-// radiotapFieldLayout 描述 radiotap 字段 0-5 的载荷长度与自然对齐。
-// 按位号升序解析，拿到字段 5（信号强度）即返回，更高位字段
-// （MCS/VHT/timestamp 等变长字段）不参与 RSSI 的对齐计算。
-var radiotapFieldLayout = [...]struct {
-	size  int
-	align int
-}{
-	{8, 8}, // 0 TSFT（u64，微秒计时器）
-	{1, 1}, // 1 Flags
-	{1, 1}, // 2 Rate
-	{4, 2}, // 3 Channel（u16 频率 MHz + u16 标志）
-	{2, 2}, // 4 FHSS
-	{1, 1}, // 5 dBm Antenna Signal（s8，负值）
-}
-
-// radiotapChannelField 是字段 3（Channel）在布局表中的位号。
-const radiotapChannelField = 3
 
 // ParseRadiotapChannel 从完整捕获帧提取接收信道编号。
 // 频率→信道换算覆盖 2.4/5/6GHz 三个频段；无法解析或频段未收录

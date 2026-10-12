@@ -105,7 +105,7 @@ WifiSec 是 Go 编写的无线安全测试工具，采用 Hexagonal Architecture
 
 ```mermaid
 flowchart TB
-    CLI["cmd/wifisec/main.go<br/>命令路由: list / serial / deauth / jam / brute / clone / devices / scan_ports / get_packet / pmkid / extract / ids / help"] --> APP["internal/functions<br/>应用编排: deauther · jammer · brute · clone · devices · portscan · sniff · pmkid · extract · ids · lists · serial"]
+    CLI["cmd/wifisec/main.go<br/>命令路由: list / serial / deauth / jam / brute / clone / devices / scan_ports / agent / shell / get_packet / pmkid / extract / ids / help"] --> APP["internal/functions<br/>应用编排: deauther · jammer · brute · clone · devices · portscan · lateral · sniff · pmkid · extract · ids · lists · serial"]
     APP -->|"端口: frameWriter<br/>channelSetter"| ESP["internal/platform/esp<br/>串口帧协议 · 复位时序 · 噪声重同步"]
     APP -->|"端口: 无线扫描"| DAR["darwin · CoreWLAN"]
     APP --> LIN["linux · iw + AF_PACKET<br/>termux · Android API"]
@@ -135,6 +135,9 @@ wifisec clone <ssid>:<密码> up [nokick] [串口]        # 克隆同名热点�
 wifisec clone down [串口]                 # 停止固件上的克隆热点
 wifisec devices [网卡名]                  # 列出当前局域网在线设备（IP/MAC/主机名/网关），免 root
 wifisec scan_ports <目标> [端口]          # nmap 风格 TCP 扫描：open/closed/filtered + banner
+wifisec agent [--port N] [--token 令牌]   # 被控端：启动横向移动 agent，等待控制端接入
+wifisec <ip> bash [--token 令牌]          # 控制端：交互 shell（IP 开头自动路由）
+wifisec <ip> whoami [--token 令牌]        # 控制端：单命令一步执行，退出码映射本地
 wifisec get_packet [网卡] [秒] [文件]     # 抓包导出 pcap（Wireshark 直读），Ctrl-C 结束
 wifisec get_packet --eapol [网卡] [秒] [文件]   # 同上，实时分析 EAPOL 握手并按 --bssid/--ssid 过滤
 wifisec pmkid <ssid|bssid> [网卡] [-o out.22000]   # 主动获取 PMKID（免客户端、免踢人），产出 hashcat 22000 行
@@ -154,6 +157,7 @@ wifisec help                              # 用法总览
 | `clone`   | 热点克隆（Evil Twin）：同名同密码 SoftAP + 可选 kick 驱赶真实 AP 客户端（ESP 协处理器；无设备时回落 Linux hostapd） | [wifi_clone.md](docs/feature/wifi_clone.md) |
 | `devices` | 局域网设备发现：TCP 探针刷 ARP + 系统邻居表交叉，输出 IP/MAC/主机名/角色，四平台免 root | [lan_analysis.md](docs/feature/lan_analysis.md) |
 | `scan_ports` | nmap 风格 TCP connect 扫描（200 并发、1.5s 超时），open/closed/filtered 三态 + 被动 banner 抓取，四平台免 root | [lan_analysis.md](docs/feature/lan_analysis.md) |
+| `agent` / `shell` | 横向移动：被控端 agent 监听 TCP（HMAC 挑战应答认证，令牌不落网），控制端 `wifisec <ip> bash` 交互 shell 或单命令一步执行，stdout/stderr 实时回传，超时击杀回退出码 124 | [lateral_movement.md](docs/feature/lateral_movement.md) |
 | `get_packet` | 连接态网卡抓包：Linux AF_PACKET / macOS BPF / Windows Npcap，实时摘要限速打印，全帧写 pcap 供 Wireshark 分析；`--eapol` 实时分析握手，`--pmkid` 主动会话与抓包共存 | [lan_analysis.md](docs/feature/lan_analysis.md) · [wifi_pmkid.md](docs/feature/wifi_pmkid.md) |
 | `pmkid` | PMKID 主动获取：假客户端发 Auth+Assoc 抓 RSN IE 中的 PMKID，免客户端、免踢人、不怕 802.11w，产出 hashcat 22000 行 | [wifi_pmkid.md](docs/feature/wifi_pmkid.md) |
 | `extract` | pcap 离线提取：握手数 / PMKID 有无 / 各帧合法性，同一 AP 双证据时优先 PMKID，`--hashcat`/`--pmkid`/`--json` 导出 | [wifi_pmkid.md](docs/feature/wifi_pmkid.md) |
@@ -199,16 +203,17 @@ wifisec help                              # 用法总览
 
 ```
 wifisec/
-├── cmd/wifisec/main.go                  # 入口：命令注册与路由（list/serial/deauth/jam/brute/clone/devices/scan_ports/get_packet/pmkid/extract/ids/help）
+├── cmd/wifisec/main.go                  # 入口：命令注册与路由（list/serial/deauth/jam/brute/clone/devices/scan_ports/agent/shell/get_packet/pmkid/extract/ids/help）
 ├── core/esp/esp.ino                     # 协处理器固件（ESP8266/ESP32 全系，编译期条件分支）
 ├── internal/
 │   ├── constants/                       # 开发者元数据等常量
-│   ├── functions/                       # 应用编排：deauther · jammer · connect(brute) · clone · devices · portscan · sniff · pmkid · extract · ids · lists · serial · help
+│   ├── functions/                       # 应用编排：deauther · jammer · connect(brute) · clone · devices · portscan · lateral · sniff · pmkid · extract · ids · lists · serial · help
 │   ├── ethernet/frame.go                # 局域网抓包帧摘要（ARP/IPv4/IPv6/TCP/UDP/ICMP/EAPOL/LLDP）
 │   ├── ieee80211/frame.go               # deauth / disassoc 帧纯字节编解码（与介质解耦，可独立单测）
 │   ├── rsnie/parse.go                   # RSN IE(0x30) 状态机解析：密码套件/AKM/RSN 能力/PMKID 列表，malformed 即弃
 │   ├── eapol/                           # EAPOL-Key 帧解析与 M1-M4 配对，归一 Candidate → hashcat 22000/16800
 │   ├── pmkid/client.go                  # PMKID 主动获取状态机（随机 STA MAC · 重试退避 · 失败分类）
+│   ├── lateral/                         # 横向移动通道：HMAC 挑战应答认证 + 长度前缀帧（agent 执行 / client 交互）
 │   ├── model/                           # wifi / command / author 领域模型
 │   ├── pcapfile/pcap.go                 # 纯 Go pcap v2.4 写入器（Wireshark/tcpdump 直读）
 │   ├── heatmap/survey.go                # 走位勘测纯数据层（网格采样 · IDW 插值 · JSON 落盘）
@@ -230,7 +235,7 @@ wifisec/
 │   ├── logo.svg                         # 项目 Logo
 │   ├── src/style/ · src/scripts/        # 文档站样式（SCSS 源 + 编译产物）与交互脚本
 │   ├── diagram/                         # PlantUML：执行流程 + 串口协议时序
-│   └── feature/                         # wifi_list / wifi_serial / wifi_deauth / wifi_jam / wifi_brute_force / wifi_clone / lan_analysis / wireless_ids / wifi_heatmap / wifi_pmkid 详细文档
+│   └── feature/                         # wifi_list / wifi_serial / wifi_deauth / wifi_jam / wifi_brute_force / wifi_clone / lan_analysis / lateral_movement / wireless_ids / wifi_heatmap / wifi_pmkid 详细文档
 ├── Makefile                             # build / list / test / 等构建编排
 └── .githooks/                           # Conventional Commits 提交信息校验钩子
 ```

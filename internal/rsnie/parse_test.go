@@ -5,6 +5,9 @@ import (
 	"testing"
 )
 
+// rsnSeedPSK 是 Fuzz 语料用的典型 WPA2-PSK/CCMP 载荷。
+var rsnSeedPSK = buildPayload(AKMTypePSK, 1)
+
 // suite 组一个 4 字节套件选择器（标准 OUI + 类型）。
 func suite(t byte) []byte {
 	return []byte{0x00, 0x0f, 0xac, t}
@@ -32,9 +35,6 @@ func buildPayload(akmType byte, pmkidCount int) []byte {
 
 	return payload
 }
-
-// rsnSeedPSK 是 Fuzz 语料用的典型 WPA2-PSK/CCMP 载荷。
-var rsnSeedPSK = buildPayload(AKMTypePSK, 1)
 
 func TestParseRSNIEValidPSK(t *testing.T) {
 	info, err := ParseRSNIE(buildPayload(AKMTypePSK, 1))

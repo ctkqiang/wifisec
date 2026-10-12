@@ -9,16 +9,16 @@ import (
 	"syscall"
 )
 
-// htons 把主机字节序的 uint16 转成网络字节序（大端）。
-func htons(v uint16) uint16 {
-	return (v << 8) | (v >> 8)
-}
-
 // FrameInjector 封装 Android 内核的 AF_PACKET 原始套接字。
 // Android 与 Linux 共享同一套内核 ABI，因此实现与 inject_linux.go 完全一致；
 // 独立文件是因为 Go 的 _linux.go 文件名后缀不会覆盖 android 构建标签。
 type FrameInjector struct {
 	fd int
+}
+
+// htons 把主机字节序的 uint16 转成网络字节序（大端）。
+func htons(v uint16) uint16 {
+	return (v << 8) | (v >> 8)
 }
 
 // OpenInjector 在指定接口上打开 AF_PACKET/SOCK_RAW 套接字。

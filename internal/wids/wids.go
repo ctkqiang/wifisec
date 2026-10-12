@@ -41,9 +41,6 @@ const (
 	maxTrackedTransmitter = 512
 )
 
-// Kind 是告警类别名，直接使用中文以便终端渲染与文档一致。
-type Kind string
-
 const (
 	KindRogueAP     Kind = "伪造AP"
 	KindKarma       Kind = "KARMA"
@@ -55,36 +52,27 @@ const (
 	KindBeaconFlood Kind = "信标泛洪"
 )
 
-// Severity 是告警等级。Critical 表示正在发生的攻击特征，
-// Warning 表示高危配置，Info 表示盘点信息。
-type Severity int
-
 const (
 	SevCritical Severity = iota
 	SevWarning
 	SevInfo
 )
 
-// String 返回等级的中文名，渲染层据此选色。
-func (severity Severity) String() string {
-	switch severity {
-	case SevCritical:
-		return "严重"
-	case SevWarning:
-		return "警告"
-	default:
-		return "提示"
-	}
-}
-
-// FrameKind 是帧级监测关心的管理帧类型。
-type FrameKind int
-
 const (
 	FrameDeauth FrameKind = iota
 	FrameDisassoc
 	FrameBeacon
 )
+
+// Kind 是告警类别名，直接使用中文以便终端渲染与文档一致。
+type Kind string
+
+// Severity 是告警等级。Critical 表示正在发生的攻击特征，
+// Warning 表示高危配置，Info 表示盘点信息。
+type Severity int
+
+// FrameKind 是帧级监测关心的管理帧类型。
+type FrameKind int
 
 // Observation 是一次扫描快照中的一个 BSS。字段刻意收窄到检测所需，
 // 与 functions.WiFiNetwork 解耦，避免引擎依赖展示层结构。
@@ -158,6 +146,18 @@ type transmitterStats struct {
 	disassoc      []time.Time
 	deauthTotal   int
 	disassocTotal int
+}
+
+// String 返回等级的中文名，渲染层据此选色。
+func (severity Severity) String() string {
+	switch severity {
+	case SevCritical:
+		return "严重"
+	case SevWarning:
+		return "警告"
+	default:
+		return "提示"
+	}
 }
 
 // NewEngine 创建引擎。

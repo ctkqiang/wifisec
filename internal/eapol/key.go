@@ -48,9 +48,6 @@ const (
 	keyInfoSecureBit = 1 << 9
 )
 
-// Message 是 4-way 握手消息的类别判定结果。
-type Message int
-
 const (
 	MessageNone Message = iota
 	MessageM1
@@ -58,6 +55,9 @@ const (
 	MessageM3
 	MessageM4
 )
+
+// Message 是 4-way 握手消息的类别判定结果。
+type Message int
 
 // KeyFrame 是一条 EAPOL-Key 消息的解析结果。
 type KeyFrame struct {

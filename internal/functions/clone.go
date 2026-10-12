@@ -75,6 +75,16 @@ type cloneRuntime struct {
 	closer    io.Closer               // ESP 路径的串口句柄；hostapd 路径为 nil
 }
 
+// espCloner 把 ESP 协处理器包装为 cloneAP：AP 承载与设备状态查询
+// 都经串口下发，板载射频执行。
+type espCloner struct {
+	injector  *platformesp.Injector
+	events    chan platformap.StationEvent
+	stopCh    chan struct{}
+	startOnce sync.Once
+	stopOnce  sync.Once
+}
+
 // WifiClone 克隆一个同名同密码的热点（Evil Twin），可选对真实 AP
 // 持续注入 deauth 驱赶其客户端。用法：
 //
@@ -345,16 +355,6 @@ func pickCloneTarget(scanned []cloneAPInfo, ssid string) (channel int, bssid str
 func fallbackCloneTarget(ssid string) (channel int, bssid string) {
 	utilities.Warn("周边未发现同名网络 %q，克隆信道回落 %d，kick 自动禁用", ssid, fallbackChannel)
 	return fallbackChannel, ""
-}
-
-// espCloner 把 ESP 协处理器包装为 cloneAP：AP 承载与设备状态查询
-// 都经串口下发，板载射频执行。
-type espCloner struct {
-	injector  *platformesp.Injector
-	events    chan platformap.StationEvent
-	stopCh    chan struct{}
-	startOnce sync.Once
-	stopOnce  sync.Once
 }
 
 func newESPCloner(injector *platformesp.Injector) *espCloner {

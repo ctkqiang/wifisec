@@ -7,6 +7,12 @@ import (
 	"time"
 )
 
+type commandError struct {
+	name   string
+	output string
+	cause  error
+}
+
 // run 以参数列表执行 termux-api 命令并返回标准输出，不经过 shell。
 func run(timeout time.Duration, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -18,12 +24,6 @@ func run(timeout time.Duration, name string, args ...string) (string, error) {
 	}
 
 	return string(output), nil
-}
-
-type commandError struct {
-	name   string
-	output string
-	cause  error
 }
 
 func (e *commandError) Error() string {

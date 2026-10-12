@@ -4,7 +4,7 @@
 
 WifiSec（无线安全审计工具）是哪吒网络安全出品的开源 WiFi 渗透测试与口令强度评估框架，采用 Hexagonal Architecture（六边形架构），Go 1.26+ 纯血实现，核心链路零 CGO。它把传统无线审计里最难缠的三件事——**root 权限、monitor 模式驱动、平台差异**——全部下沉到一块约十元的 ESP 开发板上：deauth 帧注入与关联尝试跑在板载射频，宿主机只经 USB 串口收发协议帧。
 
-关键词：WiFi 安全、无线渗透测试、deauth 攻击、802.11 帧注入、WiFi 干扰、jammer、disassociation、disassoc、全频段干扰、WPA2 密码爆破、WiFi brute force、ESP8266、ESP32、无线安全审计、wireless security audit、WiFi pentesting tool、deauthentication、WPA handshake、PMKID、PMKID attack、hashcat 22000、hashcat 16800、RSN IE、EAPOL-Key、M1-M4 握手配对、WPA handshake 离线爆破、免客户端破解、clientless attack、802.11w PMF、Termux WiFi 工具、免 root WiFi 破解、红队工具、red team、网络安全、渗透测试框架、Evil Twin、rogue AP、WiFi hotspot clone、hostapd、钓鱼热点检测、局域网设备发现、ARP 邻居表、TCP 端口扫描、nmap connect scan、banner grabbing、抓包、packet capture、pcap、Wireshark、AF_PACKET、BPF、Npcap、pcap 离线分析、无线入侵检测、wireless IDS、WIDS、rogue AP detection、KARMA attack、beacon flood、deauth flood detection、evil twin detection、加密降级检测、WEP crack detection、open WiFi audit、企业无线安全、wireless monitoring、WPA3、802.11w PMF、WiFi 热力图、wifi heatmap、信号热力图、site survey、站点勘测、RSSI 可视化、signal strength map、IDW 插值、inverse distance weighting、AP 定位、覆盖死角、dead zone、TUI、terminal UI、平面图勘测。
+关键词：WiFi 安全、无线渗透测试、deauth 攻击、802.11 帧注入、WiFi 干扰、jammer、disassociation、disassoc、全频段干扰、WPA2 密码爆破、WiFi brute force、ESP8266、ESP32、无线安全审计、wireless security audit、WiFi pentesting tool、deauthentication、WPA handshake、PMKID、PMKID attack、hashcat 22000、hashcat 16800、RSN IE、EAPOL-Key、M1-M4 握手配对、WPA handshake 离线爆破、免客户端破解、clientless attack、802.11w PMF、Termux WiFi 工具、免 root WiFi 破解、红队工具、red team、网络安全、渗透测试框架、Evil Twin、rogue AP、WiFi hotspot clone、hostapd、钓鱼热点检测、局域网设备发现、ARP 邻居表、TCP 端口扫描、nmap connect scan、banner grabbing、抓包、packet capture、pcap、Wireshark、AF_PACKET、BPF、Npcap、pcap 离线分析、无线入侵检测、wireless IDS、WIDS、rogue AP detection、KARMA attack、beacon flood、deauth flood detection、evil twin detection、加密降级检测、WEP crack detection、open WiFi audit、企业无线安全、wireless monitoring、WPA3、802.11w PMF、WiFi 热力图、wifi heatmap、信号热力图、site survey、站点勘测、RSSI 可视化、signal strength map、IDW 插值、inverse distance weighting、AP 定位、覆盖死角、dead zone、TUI、terminal UI、平面图勘测、横向移动、lateral movement、client-to-client attack、remote shell、bind shell、C2、command and control、post-exploitation、后渗透、内网横向、HMAC 挑战应答。
 
 ## 为什么选择 WifiSec
 
@@ -26,6 +26,8 @@ WifiSec（无线安全审计工具）是哪吒网络安全出品的开源 WiFi �
 - `wifisec clone down [串口]`：停止固件上的克隆热点，恢复 STA 模式
 - `wifisec devices [网卡名]`：局域网设备发现，TCP 探针刷 ARP + 系统邻居表交叉（Linux /proc/net/arp、macOS arp -an、Windows arp -a），输出 IP/MAC/主机名/网关角色，四平台免 root
 - `wifisec scan_ports <目标> [端口规格]`：nmap 风格 TCP connect 扫描（200 并发、1.5s 超时），open/closed/filtered 三态判定 + 被动 banner / HTTP HEAD 抓取，支持 top（47 端口）/all（1-1000）/逗号列表/区间，四平台免 root
+- `wifisec agent [--port N] [--token 令牌] [--timeout 秒]`：横向移动被控端——监听 TCP，HMAC-SHA256 挑战应答认证（令牌不落网），空令牌自动生成随机令牌并打印；命令经 /bin/sh -c（Windows cmd /C）解释，stdout/stderr 实时回传，超时击杀回退出码 124
+- `wifisec <ip> bash [--token 令牌]`：横向移动控制端——IP 开头自动路由进交互 shell（等价 `shell <ip> bash`），`wifisec <ip> <命令>` 单命令一步执行且远端退出码映射本地；令牌亦可经 WIFISEC_TOKEN 环境变量传递
 - `wifisec get_packet [网卡] [秒] [文件]`：连接态网卡抓包（Linux/Android AF_PACKET、macOS BPF、Windows Npcap），终端 40 行/秒限速摘要（折叠屏显不丢帧），全帧写纯 Go 手写 pcap（DLT 1），Wireshark/tcpdump 直读，Ctrl-C 收尾；`--eapol` 实时分析 EAPOL 握手并按 `--bssid`/`--ssid` 过滤，`--pmkid` 主动会话与抓包共存（Linux/Windows）
 - `wifisec pmkid <ssid|bssid> [网卡] [-o out.22000] [--ssid 名称] [--attempts N] [--json]`：PMKID 主动获取——假客户端发 Auth+Assoc，从 RSN IE 抽 PMKID，免客户端、免踢人、不怕 802.11w；AKM 非 PSK 明确拒绝，随机 STA MAC 重试退避，产出 hashcat 22000 行
 - `wifisec extract capture.pcap [--hashcat out.22000] [--pmkid out.16800] [--bssid xx] [--ssid 名称] [--json]`：pcap 离线提取——逐 AP 统计完整握手数 / PMKID 有无 / 各帧合法性，同一 BSSID 双证据时优先 PMKID，隐藏 SSID 恢复不了拒绝产出（绝不空 salt 算 PBKDF2）
@@ -60,6 +62,7 @@ go install github.com/ctkqiang/wifisec/cmd/wifisec@latest
 - 下载页（GitHub Releases）: https://github.com/ctkqiang/wifisec/releases
 - deauth 帧注入详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_deauth.md
 - jam 全频段干扰详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_jam.md
+- 横向移动（agent/shell）详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/lateral_movement.md
 - brute 密码爆破详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_brute_force.md
 - clone 热点克隆详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_clone.md
 - 局域网分析三件套（devices / scan_ports / get_packet）详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/lan_analysis.md

@@ -40,22 +40,11 @@ const (
 	allPortsUpper = 1000
 )
 
-// 端口状态三态，文案直接采用 nmap 术语。
-type portState string
-
 const (
 	portOpen     portState = "open"
 	portClosed   portState = "closed"
 	portFiltered portState = "filtered"
 )
-
-// portResult 是单个端口的扫描结论。
-type portResult struct {
-	Port    int
-	State   portState
-	Service string
-	Banner  string
-}
 
 // topTCPPorts 是默认端口集：运维排障最常确认的四十余个服务，
 // 空参或显式 top 时使用；想扫更多请给区间，如 1-1000。
@@ -111,6 +100,17 @@ var portColumns = []tableColumn[portResult]{
 		Priority: 1,
 		Shrink:   true,
 	},
+}
+
+// 端口状态三态，文案直接采用 nmap 术语。
+type portState string
+
+// portResult 是单个端口的扫描结论。
+type portResult struct {
+	Port    int
+	State   portState
+	Service string
+	Banner  string
 }
 
 // CheckPort 对目标执行 TCP connect 扫描。

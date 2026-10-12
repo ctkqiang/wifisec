@@ -67,6 +67,18 @@ const (
 	ReasonClass3FromNonAssoc uint16 = 7
 )
 
+// ManagementInfo 是一条空中管理帧的关键字段摘录。
+// Transmitter 取自 addr2（收发双方中“发送方”永远在 addr2），
+// 是 deauth 风暴与信标泛洪的归因主键；SSID 仅在信标/探测响应中解析。
+type ManagementInfo struct {
+	Subtype     int
+	Transmitter net.HardwareAddr // addr2：发送方 MAC
+	Receiver    net.HardwareAddr // addr1：接收方 MAC（广播=ff:*）
+	BSSID       net.HardwareAddr // addr3：帧所属 BSS
+	ReasonCode  uint16           // 仅 deauth(12)/disassoc(10) 有效
+	SSID        string           // 仅 beacon(8)/probe-resp(5) 有效，隐藏网络为空
+}
+
 // BuildDeauthFrame 构造广播 802.11 deauthentication 管理帧。
 // 返回帧长度为 DeauthFrameLen（34 字节），可直接经 monitor 接口注入空中：
 // Linux/Android 使用 AF_PACKET，Windows 使用 Npcap 的 pcap_sendpacket。
@@ -130,18 +142,6 @@ func buildManagementFrame(bssid net.HardwareAddr, subtype int) ([]byte, error) {
 	frame[33] = byte(ReasonClass3FromNonAssoc >> 8)
 
 	return frame, nil
-}
-
-// ManagementInfo 是一条空中管理帧的关键字段摘录。
-// Transmitter 取自 addr2（收发双方中“发送方”永远在 addr2），
-// 是 deauth 风暴与信标泛洪的归因主键；SSID 仅在信标/探测响应中解析。
-type ManagementInfo struct {
-	Subtype     int
-	Transmitter net.HardwareAddr // addr2：发送方 MAC
-	Receiver    net.HardwareAddr // addr1：接收方 MAC（广播=ff:*）
-	BSSID       net.HardwareAddr // addr3：帧所属 BSS
-	ReasonCode  uint16           // 仅 deauth(12)/disassoc(10) 有效
-	SSID        string           // 仅 beacon(8)/probe-resp(5) 有效，隐藏网络为空
 }
 
 // RadioTapLen 从 radiotap 头部读取自身总长（it_len，小端 u16）。

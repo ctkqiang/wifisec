@@ -28,6 +28,15 @@ type CaptureSource struct {
 	linkType uint32
 }
 
+// pcapPacketHeader 与 wpcap.dll 的 struct pcap_pkthdr 对齐：
+// Windows 的 long 是 32 位，时间戳两个字段各 4 字节，caplen 固定在偏移 8。
+type pcapPacketHeader struct {
+	tvSec    uint32
+	tvUsec   uint32
+	captured uint32
+	original uint32
+}
+
 // OpenCapture 在 \Device\NPF_{GUID} 上以混杂模式打开抓包句柄，
 // read_timeout=500ms 让 pcap_next_ex 周期性返回 0，便于上层响应 Ctrl-C。
 func OpenCapture(devicePath string) (*CaptureSource, error) {
@@ -65,15 +74,6 @@ func OpenCapture(devicePath string) (*CaptureSource, error) {
 		buffer:   make([]byte, 0, 65535),
 		linkType: uint32(linkType),
 	}, nil
-}
-
-// pcapPacketHeader 与 wpcap.dll 的 struct pcap_pkthdr 对齐：
-// Windows 的 long 是 32 位，时间戳两个字段各 4 字节，caplen 固定在偏移 8。
-type pcapPacketHeader struct {
-	tvSec    uint32
-	tvUsec   uint32
-	captured uint32
-	original uint32
 }
 
 // Read 读取一帧。pcap_next_ex 返回值：1 成功，0 超时，-1 错误，-2 离线文件 EOF。

@@ -48,14 +48,6 @@ const (
 // routeProbeTarget 是 RFC5737 文档地址，UDP connect 只会做路由查询不会发包。
 const routeProbeTarget = "203.0.113.1:80"
 
-// lanDevice 是设备清单表格的一行。
-type lanDevice struct {
-	IP       string
-	MAC      string
-	Hostname string
-	Role     string
-}
-
 // deviceColumns 必须多行展开、字段对齐并显式给 Priority，
 // 这是项目里所有 renderTable 调用的统一约定。
 var deviceColumns = []tableColumn[lanDevice]{
@@ -81,6 +73,14 @@ var deviceColumns = []tableColumn[lanDevice]{
 		Color:    roleColor,
 		Priority: 0,
 	},
+}
+
+// lanDevice 是设备清单表格的一行。
+type lanDevice struct {
+	IP       string
+	MAC      string
+	Hostname string
+	Role     string
 }
 
 // GetAllDeviceInThisWifi 列出当前 Wi-Fi（或指定网卡）局域网内的设备。

@@ -31,6 +31,16 @@ type chanReader struct {
 	onEmpty func() []byte // 队列耗尽时的补充帧（模拟 AP 持续广播信标）
 }
 
+// fakeWriter 是帧注入的测试替身：按写入帧的子类型回放预设的 AP 应答，
+// 并记录全部写入帧供断言（重试换 MAC、STA 地址归属等）。
+type fakeWriter struct {
+	reader    *chanReader
+	authResp  [][]byte // 收到认证请求后回放
+	assocResp [][]byte // 收到关联请求后回放（M1 单列，紧跟其后）
+	m1        []byte
+	written   [][]byte
+}
+
 // newChanReader 预载初始帧（通常是每轮尝试一份信标）。
 func newChanReader(initial ...[]byte) *chanReader {
 	r := &chanReader{frames: make(chan []byte, 32)}
@@ -61,16 +71,6 @@ func (r *chanReader) Read() ([]byte, error) {
 
 		return nil, errors.New("当前无帧")
 	}
-}
-
-// fakeWriter 是帧注入的测试替身：按写入帧的子类型回放预设的 AP 应答，
-// 并记录全部写入帧供断言（重试换 MAC、STA 地址归属等）。
-type fakeWriter struct {
-	reader    *chanReader
-	authResp  [][]byte // 收到认证请求后回放
-	assocResp [][]byte // 收到关联请求后回放（M1 单列，紧跟其后）
-	m1        []byte
-	written   [][]byte
 }
 
 // Write 模拟 AP 行为：认证请求 → 回认证响应；关联请求 → 回关联响应 + M1。

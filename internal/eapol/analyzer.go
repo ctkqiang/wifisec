@@ -34,13 +34,13 @@ const (
 // 未配对消息不会超过几条（重传在内），超出即视为噪声洪泛，淘汰最旧。
 const pendingLimit = 256
 
-// Kind 区分候选来源：PMKID（主动关联产出）或 EAPOL 握手对。
-type Kind int
-
 const (
 	KindEAPOL Kind = iota
 	KindPMKID
 )
+
+// Kind 区分候选来源：PMKID（主动关联产出）或 EAPOL 握手对。
+type Kind int
 
 // Candidate 是一条可离线破解的中间结果，同时承载 PMKID 与
 // EAPOL 握手对两种形态，22000/16800 格式化器只消费这一个结构。
@@ -63,6 +63,31 @@ type Candidate struct {
 type keyPool struct {
 	order []string
 	items map[string]*KeyFrame
+}
+
+// Stats 是 Analyzer 的累计统计，供 extract 摘要与 get_packet 进度打印。
+type Stats struct {
+	EAPOLFrames     int
+	M1Count         int
+	M2Count         int
+	M3Count         int
+	M4Count         int
+	Pairs           int
+	PMKIDCandidates int
+}
+
+// Analyzer 把原始帧流转成离线破解候选。
+// 并发安全：抓包 goroutine 调 Feed，主线程调 SetESSID/Stats。
+type Analyzer struct {
+	mu       sync.Mutex
+	linkType int
+	essids   map[string]string // 空中学到的 BSSID → ESSID
+	explicit map[string]string // 用户显式指定（优先于空中学习）
+	m1s      *keyPool
+	m2s      *keyPool
+	m3s      *keyPool
+	reported map[string]bool
+	stats    Stats
 }
 
 func newKeyPool() *keyPool {
@@ -89,31 +114,6 @@ func (p *keyPool) put(key string, frame *KeyFrame) {
 // get 查找；不存在返回 nil。
 func (p *keyPool) get(key string) *KeyFrame {
 	return p.items[key]
-}
-
-// Stats 是 Analyzer 的累计统计，供 extract 摘要与 get_packet 进度打印。
-type Stats struct {
-	EAPOLFrames     int
-	M1Count         int
-	M2Count         int
-	M3Count         int
-	M4Count         int
-	Pairs           int
-	PMKIDCandidates int
-}
-
-// Analyzer 把原始帧流转成离线破解候选。
-// 并发安全：抓包 goroutine 调 Feed，主线程调 SetESSID/Stats。
-type Analyzer struct {
-	mu       sync.Mutex
-	linkType int
-	essids   map[string]string // 空中学到的 BSSID → ESSID
-	explicit map[string]string // 用户显式指定（优先于空中学习）
-	m1s      *keyPool
-	m2s      *keyPool
-	m3s      *keyPool
-	reported map[string]bool
-	stats    Stats
 }
 
 // NewAnalyzer 按捕获链路类型建分析器：DLT 1（连接态以太网）或

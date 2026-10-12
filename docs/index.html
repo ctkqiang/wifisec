@@ -74,6 +74,7 @@
           <a href="#cmd-clone">clone · 热点克隆</a>
           <a href="#cmd-devices">devices · 设备发现</a>
           <a href="#cmd-scan">scan_ports · 端口扫描</a>
+          <a href="#cmd-lateral">agent/shell · 横向移动</a>
           <a href="#cmd-packet">get_packet · 抓包导出</a>
           <a href="#cmd-pmkid">pmkid · PMKID 主动获取</a>
           <a href="#cmd-extract">extract · pcap 离线提取</a>
@@ -361,6 +362,19 @@ wifisec scan_ports 192.168.1.46 22,80,8000-8100  <span class="cmt"># 列表与�
           <div>connect 扫描在对端日志里就是一次真实连接，<strong>没有隐蔽性</strong>；只支持 TCP（无 UDP / SYN 半开扫描）。filtered 也可能只是主机不在线，先用 <code>devices</code> 确认。</div>
         </div>
         <p>三态判定、banner 机制与能力边界见 <a href="feature/lan_analysis.md">lan_analysis.md §3</a>。</p>
+      </section>
+
+      <section id="cmd-lateral">
+        <h2>agent / shell · 横向移动<a class="anchor" href="#cmd-lateral">#</a></h2>
+        <p>后渗透横向扩展通道：被控端 <code>wifisec agent</code> 监听 TCP（默认 9485），控制端 <code>wifisec &lt;ip&gt; bash</code> 拿交互 shell，<code>wifisec &lt;ip&gt; &lt;命令&gt;</code> 单命令一步执行（IP 开头自动路由）。认证走 HMAC-SHA256 挑战应答——令牌不落网、抓包重放无效，空令牌自动生成随机令牌并打印。</p>
+        <pre><code class="lang-bash">wifisec agent --token lab2026                 <span class="cmt"># 被控端：监听等待接入</span>
+wifisec 192.168.1.123 bash --token lab2026    <span class="cmt"># 控制端：交互 shell</span>
+wifisec 192.168.1.123 whoami --token lab2026  <span class="cmt"># 单命令一步执行</span></code></pre>
+        <div class="alert warning">
+          <span class="alert-icon">⚠</span>
+          <div>仅限自有网络或已获书面授权的环境使用。agent 需先在目标机上落地启动——本模块是「已拿下 → 扩展」通道，不含投递手段；交互为行级语义（非 PTY），vim/top 等全屏程序不支持属刻意取舍。</div>
+        </div>
+        <p>协议时序、超时击杀（退出码 124）、令牌传递与排错见 <a href="feature/lateral_movement.md">lateral_movement.md</a>。</p>
       </section>
 
       <section id="cmd-packet">

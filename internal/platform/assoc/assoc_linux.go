@@ -10,14 +10,14 @@ import (
 	"strings"
 )
 
+// profileName 是爆破用的临时连接配置名。固定名字而非 SSID：
+// 用户系统里可能已有同名 SSID 的自己的配置，按 SSID 删除会误伤。
+const profileName = "wifisec-brute"
+
 // Native 是 Linux 本机网卡关联器，经 NetworkManager（nmcli）尝试关联。
 type Native struct {
 	iface, lastBSSID string
 }
-
-// profileName 是爆破用的临时连接配置名。固定名字而非 SSID：
-// 用户系统里可能已有同名 SSID 的自己的配置，按 SSID 删除会误伤。
-const profileName = "wifisec-brute"
 
 // NewNative 检查 nmcli 可用并定位受管 WiFi 接口。
 func NewNative() (*Native, error) {

@@ -52,6 +52,14 @@ type SniffOptions struct {
 	JSON       bool   // --json：--pmkid 会话结果的机器可读输出
 }
 
+// captureStats 汇总一次抓包会话的计数器。
+type captureStats struct {
+	packets  int
+	bytes    int
+	started  time.Time
+	protocol map[string]int
+}
+
 // GetPacket 打开网卡抓包并把全部帧写入 pcap 文件。
 // 用法：wifisec get_packet [网卡名] [秒数] [输出文件.pcap]
 //
@@ -253,14 +261,6 @@ func runCaptureSession(ctx context.Context, options SniffOptions) error {
 	}
 
 	return nil
-}
-
-// captureStats 汇总一次抓包会话的计数器。
-type captureStats struct {
-	packets  int
-	bytes    int
-	started  time.Time
-	protocol map[string]int
 }
 
 // captureLoop 是主读取循环；仅在空闲超时点检查取消信号，

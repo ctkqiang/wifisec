@@ -10,13 +10,13 @@ import (
 	"time"
 )
 
+// profileName 是爆破用的临时配置名。固定名字而非 SSID，避免误删用户已有配置。
+const profileName = "wifisec-brute"
+
 // Native 是 Windows 本机网卡关联器，经 netsh 临时无线配置尝试关联。
 type Native struct {
 	profilePath, lastBSSID string
 }
-
-// profileName 是爆破用的临时配置名。固定名字而非 SSID，避免误删用户已有配置。
-const profileName = "wifisec-brute"
 
 // NewNative 准备临时配置文件的落盘位置。
 func NewNative() (*Native, error) {

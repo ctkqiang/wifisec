@@ -8,25 +8,25 @@
 // 该步骤由 Makefile 的 build 目标统一完成，保证 clone 后开箱可复现。
 package darwin
 
-/*
-#cgo CFLAGS: -x objective-c -fmodules -fobjc-arc
-#cgo LDFLAGS: -framework Foundation -framework AppKit -framework CoreWLAN -framework CoreLocation
-#cgo LDFLAGS: -Wl,-sectcreate,__TEXT,__info_plist,${SRCDIR}/Info.plist
-
-#include <stdlib.h>
-
-int wifisec_location_status(void);
-int wifisec_location_request(int timeout_sec);
-const char *wifisec_cw_scan(char **err_msg);
-void wifisec_free(void *pointer);
-*/
-import "C"
-
 import (
 	"encoding/json"
 	"errors"
 	"time"
 	"unsafe"
+
+	/*
+		#cgo CFLAGS: -x objective-c -fmodules -fobjc-arc
+		#cgo LDFLAGS: -framework Foundation -framework AppKit -framework CoreWLAN -framework CoreLocation
+		#cgo LDFLAGS: -Wl,-sectcreate,__TEXT,__info_plist,${SRCDIR}/Info.plist
+
+		#include <stdlib.h>
+
+		int wifisec_location_status(void);
+		int wifisec_location_request(int timeout_sec);
+		const char *wifisec_cw_scan(char **err_msg);
+		void wifisec_free(void *pointer);
+	*/
+	"C"
 )
 
 // LocationStatus 返回当前进程的定位授权状态，不触发任何弹窗。

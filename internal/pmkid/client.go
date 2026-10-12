@@ -40,20 +40,6 @@ const (
 	authTransactionResponse = 2
 )
 
-// FrameReader 是帧读取端口：实现方需自带超时粒度（capture.Source 满足），
-// 返回的帧含 radiotap 头。
-type FrameReader interface {
-	Read() ([]byte, error)
-}
-
-// FrameWriter 是帧注入端口。
-type FrameWriter interface {
-	Write(frame []byte) error
-}
-
-// Failure 是 PMKID 获取的失败分类，字符串值可直接用于 --json 输出。
-type Failure string
-
 const (
 	// FailureNoBeacon：目标信道上收不到 AP 信标（信道切换未生效/超距/掉线）。
 	FailureNoBeacon Failure = "no-beacon"
@@ -73,6 +59,20 @@ const (
 	FailureTimeout Failure = "timeout"
 )
 
+// FrameReader 是帧读取端口：实现方需自带超时粒度（capture.Source 满足），
+// 返回的帧含 radiotap 头。
+type FrameReader interface {
+	Read() ([]byte, error)
+}
+
+// FrameWriter 是帧注入端口。
+type FrameWriter interface {
+	Write(frame []byte) error
+}
+
+// Failure 是 PMKID 获取的失败分类，字符串值可直接用于 --json 输出。
+type Failure string
+
 // Error 是带失败分类的 PMKID 获取错误。
 type Error struct {
 	Failure    Failure
@@ -81,17 +81,17 @@ type Error struct {
 	AKMSummary string // FailureNonPSK 时的 AKM 判定说明
 }
 
-// Error 实现 error 接口：分类 + 尝试轮次 + 细节，文案可直接展示。
-func (e *Error) Error() string {
-	prefix := fmt.Sprintf("PMKID 获取失败（%s，第 %d 轮）", e.Failure, e.Attempt)
-	if e.AKMSummary != "" {
-		prefix += "：" + e.AKMSummary
-	}
-	if e.Detail != "" {
-		return prefix + " · " + e.Detail
-	}
-
-	return prefix
+// attemptState 是单轮尝试的可变状态。
+type attemptState struct {
+	staMAC    net.HardwareAddr
+	rsn       *rsnie.RSNInfo
+	rsnRaw    []byte // beacon RSN IE 载荷（关联请求原样回显）
+	essid     string
+	rssi      int
+	channel   int
+	authOK    bool
+	assocOK   bool
+	sentAssoc bool
 }
 
 // Result 是一次成功的 PMKID 提取结果。
@@ -122,6 +122,19 @@ type Config struct {
 // Client 驱动"认证 → 关联 → 提取 PMKID"状态机。
 type Client struct {
 	config Config
+}
+
+// Error 实现 error 接口：分类 + 尝试轮次 + 细节，文案可直接展示。
+func (e *Error) Error() string {
+	prefix := fmt.Sprintf("PMKID 获取失败（%s，第 %d 轮）", e.Failure, e.Attempt)
+	if e.AKMSummary != "" {
+		prefix += "：" + e.AKMSummary
+	}
+	if e.Detail != "" {
+		return prefix + " · " + e.Detail
+	}
+
+	return prefix
 }
 
 // NewClient 归一化配置并建客户端。
@@ -177,19 +190,6 @@ func (c *Client) Run(ctx context.Context) (*Result, error) {
 	}
 
 	return nil, lastErr
-}
-
-// attemptState 是单轮尝试的可变状态。
-type attemptState struct {
-	staMAC    net.HardwareAddr
-	rsn       *rsnie.RSNInfo
-	rsnRaw    []byte // beacon RSN IE 载荷（关联请求原样回显）
-	essid     string
-	rssi      int
-	channel   int
-	authOK    bool
-	assocOK   bool
-	sentAssoc bool
 }
 
 // runAttempt 执行单轮"等信标 → 认证 → 关联 → 提取 PMKID"状态机。

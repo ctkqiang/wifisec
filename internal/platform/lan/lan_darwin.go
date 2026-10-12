@@ -11,6 +11,9 @@ import (
 	"time"
 )
 
+// 命令挂死会让整个发现流程卡住，统一给 3 秒上限。
+const commandTimeout = 3 * time.Second
+
 // BSD 系 arp 输出形如：
 //
 //	? (192.168.1.1) at f4:ec:be:aa:bb:cc on en0 ifscope [ethernet]
@@ -20,9 +23,6 @@ import (
 var bsdARPEntryPattern = regexp.MustCompile(
 	`\((\d+\.\d+\.\d+\.\d+)\)\s+at\s+(\S+)(?:\s+on\s+(\S+))?`,
 )
-
-// 命令挂死会让整个发现流程卡住，统一给 3 秒上限。
-const commandTimeout = 3 * time.Second
 
 // Neighbors 调用 arp -an 读取当前邻居表。
 func Neighbors() ([]Neighbor, error) {

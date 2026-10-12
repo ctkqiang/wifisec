@@ -15,11 +15,6 @@ import (
 	"fmt"
 )
 
-// standardOUI 是 802.11 标准套件 OUI 00-0F-AC。
-// 所有标准加密/AKM 套件共享该 OUI，厂商私有套件（如 00-50-F2 微软 WPA）
-// 对 PMKID 离线破解一律不适用。
-var standardOUI = [3]byte{0x00, 0x0F, 0xAC}
-
 // 标准 OUI 下的 AKM 类型编号（802.11-2016 表 9-135）。
 const (
 	// AKMType8021X：企业级 802.1X/EAP，PMK 由 EAP 会话协商派生，
@@ -43,15 +38,15 @@ const (
 	AKMTypeSAE byte = 8
 )
 
+// standardOUI 是 802.11 标准套件 OUI 00-0F-AC。
+// 所有标准加密/AKM 套件共享该 OUI，厂商私有套件（如 00-50-F2 微软 WPA）
+// 对 PMKID 离线破解一律不适用。
+var standardOUI = [3]byte{0x00, 0x0F, 0xAC}
+
 // Cipher 是加密套件选择器：3 字节 OUI + 1 字节类型。
 type Cipher struct {
 	OUI  [3]byte
 	Type byte
-}
-
-// String 返回 "00-0F-AC:04"（CCMP-128）形式的标准记法。
-func (c Cipher) String() string {
-	return fmt.Sprintf("%02x-%02x-%02x:%02x", c.OUI[0], c.OUI[1], c.OUI[2], c.Type)
 }
 
 // AKM 是认证密钥管理套件选择器，决定 PMK 的派生方式——
@@ -59,6 +54,37 @@ func (c Cipher) String() string {
 type AKM struct {
 	OUI  [3]byte
 	Type byte
+}
+
+// Capabilities 是 RSN 能力位域（2 字节，LSB 为 bit0）。
+type Capabilities struct {
+	Raw uint16
+}
+
+// PMKIDEntry 是单个 PMKID：HMAC-SHA1(PMK, "PMK Name" ‖ MAC_AP ‖ MAC_STA)
+// 的 16 字节截断。对 PSK 网络，PMK 可由密码直接算出，因此拿到
+// PMKID + 双方 MAC 即可离线验证候选密码。
+type PMKIDEntry [16]byte
+
+// RSNInfo 是 RSN IE 载荷的完整解析结果。
+type RSNInfo struct {
+	Version         uint16
+	GroupCipher     Cipher
+	PairwiseCiphers []Cipher
+	AKMSuites       []AKM
+	Capabilities    Capabilities
+	PMKIDs          []PMKIDEntry // 缺省（字段不存在）或数量为 0 时为 nil
+}
+
+// parser 是 RSN IE 的游标步进器：pos 永远指向下一个待读字段。
+type parser struct {
+	buf []byte
+	pos int
+}
+
+// String 返回 "00-0F-AC:04"（CCMP-128）形式的标准记法。
+func (c Cipher) String() string {
+	return fmt.Sprintf("%02x-%02x-%02x:%02x", c.OUI[0], c.OUI[1], c.OUI[2], c.Type)
 }
 
 // String 返回 "00-0F-AC:02"（PSK）形式的标准记法。
@@ -77,11 +103,6 @@ func (a AKM) IsPSK() bool {
 	return a.IsStandard() && (a.Type == AKMTypePSK || a.Type == AKMTypePSKSHA256)
 }
 
-// Capabilities 是 RSN 能力位域（2 字节，LSB 为 bit0）。
-type Capabilities struct {
-	Raw uint16
-}
-
 // PreAuth 报告 AP 是否支持预认证（bit0）。
 func (c Capabilities) PreAuth() bool { return c.Raw&0x0001 != 0 }
 
@@ -95,21 +116,6 @@ func (c Capabilities) MFPCapable() bool { return c.Raw&0x0040 != 0 }
 // 强制 PMF 的网络广播 deauth 无效，deauth → 抓握手的传统链路在此失效，
 // 这正是 PMKID 路径的价值所在。
 func (c Capabilities) MFPRequired() bool { return c.Raw&0x0080 != 0 }
-
-// PMKIDEntry 是单个 PMKID：HMAC-SHA1(PMK, "PMK Name" ‖ MAC_AP ‖ MAC_STA)
-// 的 16 字节截断。对 PSK 网络，PMK 可由密码直接算出，因此拿到
-// PMKID + 双方 MAC 即可离线验证候选密码。
-type PMKIDEntry [16]byte
-
-// RSNInfo 是 RSN IE 载荷的完整解析结果。
-type RSNInfo struct {
-	Version         uint16
-	GroupCipher     Cipher
-	PairwiseCiphers []Cipher
-	AKMSuites       []AKM
-	Capabilities    Capabilities
-	PMKIDs          []PMKIDEntry // 缺省（字段不存在）或数量为 0 时为 nil
-}
 
 // HasPMKID 报告 IE 是否携带至少一个 PMKID。
 func (r *RSNInfo) HasPMKID() bool {
@@ -225,12 +231,6 @@ func ParseRSNIE(payload []byte) (*RSNInfo, error) {
 	// 静默忽略——完整性已由上面各步的边界检查保证。
 
 	return info, nil
-}
-
-// parser 是 RSN IE 的游标步进器：pos 永远指向下一个待读字段。
-type parser struct {
-	buf []byte
-	pos int
 }
 
 // need 检查剩余字节是否足够读出 n 字节，不足时报出字段名，
