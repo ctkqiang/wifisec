@@ -23,6 +23,10 @@ var (
 		"devices":    functions.GetAllDeviceInThisWifi,
 		"scan_ports": functions.CheckPort,
 		"get_packet": functions.GetPacket,
+		"pmkid":      functions.RunPMKID,
+		"extract":    functions.RunExtract,
+		"ids":        functions.RunWirelessIDS,
+		"heatmap":    functions.RunHeatmap,
 		"help":       functions.HelpUsage,
 	}
 )

@@ -43,9 +43,20 @@ const (
 	// frameTypeManagement 是 802.11 帧类型字段中的管理帧取值（bit 2-3 = 00）。
 	frameTypeManagement = 0
 
-	// subtypeDeauth 是管理帧子类型字段中的 deauthentication 取值（bit 4-7 = 1100）。
-	// Frame Control 第一字节 = subtype<<4 | type<<2 | version = 0xC0。
-	subtypeDeauth = 12
+	// 管理帧子类型取值（Frame Control 低字节 bit 4-7）：
+	// IDS 只关心这四类——它们无需关联即可空中发送，是攻击与侦测的主战场。
+	subtypeDeauth    = 12
+	subtypeDisassoc  = 10
+	subtypeBeacon    = 8
+	subtypeProbeResp = 5
+)
+
+// 管理帧子类型的导出别名：IDS 帧分类按此判定，避免调用方触碰私有常量。
+const (
+	SubtypeBeacon    = subtypeBeacon
+	SubtypeProbeResp = subtypeProbeResp
+	SubtypeDisassoc  = subtypeDisassoc
+	SubtypeDeauth    = subtypeDeauth
 )
 
 // deauth 帧使用的 Reason Code（802.11 标准 §9.4.1.7 定义）。
@@ -108,4 +119,88 @@ func BuildDeauthFrame(bssid net.HardwareAddr) ([]byte, error) {
 	frame[33] = byte(ReasonClass3FromNonAssoc >> 8)
 
 	return frame, nil
+}
+
+// ManagementInfo 是一条空中管理帧的关键字段摘录。
+// Transmitter 取自 addr2（收发双方中“发送方”永远在 addr2），
+// 是 deauth 风暴与信标泛洪的归因主键；SSID 仅在信标/探测响应中解析。
+type ManagementInfo struct {
+	Subtype     int
+	Transmitter net.HardwareAddr // addr2：发送方 MAC
+	Receiver    net.HardwareAddr // addr1：接收方 MAC（广播=ff:*）
+	BSSID       net.HardwareAddr // addr3：帧所属 BSS
+	ReasonCode  uint16           // 仅 deauth(12)/disassoc(10) 有效
+	SSID        string           // 仅 beacon(8)/probe-resp(5) 有效，隐藏网络为空
+}
+
+// RadioTapLen 从 radiotap 头部读取自身总长（it_len，小端 u16）。
+// 有了 it_len 就无需逐位展开 it_present 位图即可跳到 802.11 帧本体。
+// 返回 false 表示头部不完整或长度不合理，调用方应按无 radiotap 处理。
+func RadioTapLen(frame []byte) (int, bool) {
+	if len(frame) < radiotapHeaderLen {
+		return 0, false
+	}
+
+	length := int(frame[2]) | int(frame[3])<<8
+	if length < radiotapHeaderLen || length > len(frame) {
+		return 0, false
+	}
+
+	return length, true
+}
+
+// ParseManagement 解析不带 radiotap 的 802.11 管理帧。
+// 数据帧（type!=00）返回错误：IDS 关心的去认证/信标/探测响应全部是管理帧，
+// 数据帧只服务吞吐，不值得为它拓宽解析面。
+func ParseManagement(frame []byte) (ManagementInfo, error) {
+	if len(frame) < macHeaderLen {
+		return ManagementInfo{}, errors.New("帧长不足 24 字节，MAC 头不完整")
+	}
+
+	if frameType := frame[0] >> 2 & 0x03; frameType != frameTypeManagement {
+		return ManagementInfo{}, errors.New("非管理帧，仅解析 type=00 的管理帧")
+	}
+
+	info := ManagementInfo{
+		Subtype:     int(frame[0] >> 4),
+		Transmitter: net.HardwareAddr(append([]byte(nil), frame[10:16]...)),
+		Receiver:    net.HardwareAddr(append([]byte(nil), frame[4:10]...)),
+		BSSID:       net.HardwareAddr(append([]byte(nil), frame[16:22]...)),
+	}
+
+	// deauth/disassoc 帧体第一个字段是 Reason Code（uint16 小端）。
+	if (info.Subtype == subtypeDeauth || info.Subtype == subtypeDisassoc) && len(frame) >= macHeaderLen+reasonCodeLen {
+		info.ReasonCode = uint16(frame[macHeaderLen]) | uint16(frame[macHeaderLen+1])<<8
+	}
+
+	// 信标与探测响应的帧体：固定参数 12 字节（时间戳 8 + 间隔 2 + 能力 2），
+	// 其后是 TLV 信息元素；SSID 是首个元素（编号 0），空 SSID 即隐藏网络。
+	if info.Subtype == subtypeBeacon || info.Subtype == subtypeProbeResp {
+		info.SSID = parseSSIDElement(frame[macHeaderLen:])
+	}
+
+	return info, nil
+}
+
+// parseSSIDElement 在管理帧体的信息元素区扫描 SSID（元素编号 0）。
+// 信标与探测响应的固定参数同为 12 字节（时间戳 8 + 间隔 2 + 能力 2），
+// TLV 自描述，统一从固定段之后扫起。
+// 长度为 0 即隐藏网络，返回空串；截断/畸形同样返回空串不抛错，
+// IDS 不应把攻击者构造的畸形帧升级成运行时故障。
+func parseSSIDElement(body []byte) string {
+	offset := 12
+	for offset+2 <= len(body) {
+		tagLength := int(body[offset+1])
+		if body[offset] == 0 {
+			if offset+2+tagLength > len(body) {
+				return ""
+			}
+
+			return string(body[offset+2 : offset+2+tagLength])
+		}
+
+		offset += 2 + tagLength
+	}
+
+	return ""
 }

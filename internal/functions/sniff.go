@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ctkqiang/wifisec/internal/eapol"
 	"github.com/ctkqiang/wifisec/internal/ethernet"
 	"github.com/ctkqiang/wifisec/internal/pcapfile"
 	"github.com/ctkqiang/wifisec/internal/platform/capture"
@@ -43,14 +45,27 @@ type SniffOptions struct {
 	Seconds    int           // 0 表示抓到 Ctrl-C 为止
 	Duration   time.Duration // Seconds 的换算结果，0 同样表示无限
 	OutputPath string
+	EAPOL      bool   // --eapol：实时握手/PMKID 分析（与 pcap 落盘共存）
+	PMKID      bool   // --pmkid：主动 PMKID 会话（monitor + 注入 + 抓包共存）
+	BSSID      string // --bssid：目标过滤 / --pmkid 的攻击目标
+	SSID       string // --ssid：ESSID 显式 salt（隐藏网络/以太网视角）
+	JSON       bool   // --json：--pmkid 会话结果的机器可读输出
 }
 
 // GetPacket 打开网卡抓包并把全部帧写入 pcap 文件。
 // 用法：wifisec get_packet [网卡名] [秒数] [输出文件.pcap]
+//
+//	[--eapol] 实时分析握手与 PMKID 候选
+//	[--pmkid --bssid xx] 主动 PMKID 会话与抓包共存（monitor + 注入）
 func GetPacket(arguments []string) error {
 	options, err := ParseSniffArgs(arguments)
 	if err != nil {
 		return err
+	}
+
+	// --pmkid 走 monitor 主动会话路径，与连接态抓包分支互斥。
+	if options.PMKID {
+		return runPMKIDCaptureSession(options)
 	}
 
 	if options.Interface == "" {
@@ -78,18 +93,43 @@ func GetPacket(arguments []string) error {
 	return runCaptureSession(ctx, options)
 }
 
-// ParseSniffArgs 按位置语义解析参数：纯整数是秒数，带路径分隔符或
-// .pcap/.cap 后缀的是输出文件，其余视为网卡名；三者都可省略。
+// ParseSniffArgs 解析位置参数与 flag：纯整数是秒数，带路径分隔符或
+// .pcap/.cap 后缀的是输出文件，其余视为网卡名；--eapol/--pmkid 为
+// 布尔开关，--bssid/--ssid 带值。位置参数语义与旧版完全兼容。
 func ParseSniffArgs(arguments []string) (SniffOptions, error) {
 	options := SniffOptions{}
 
-	for _, raw := range arguments {
-		token := strings.TrimSpace(raw)
+	for index := 0; index < len(arguments); index++ {
+		token := strings.TrimSpace(arguments[index])
 		if token == "" {
 			continue
 		}
 
 		switch {
+		case token == "--eapol":
+			options.EAPOL = true
+		case token == "--pmkid":
+			options.PMKID = true
+		case token == "--json":
+			options.JSON = true
+		case token == "--bssid":
+			if index+1 >= len(arguments) {
+				return options, errors.New("--bssid 需要 MAC 地址，例如 --bssid aa:bb:cc:dd:ee:ff")
+			}
+
+			index++
+			if _, err := net.ParseMAC(strings.TrimSpace(arguments[index])); err != nil {
+				return options, fmt.Errorf("非法 BSSID %q：%v", arguments[index], err)
+			}
+
+			options.BSSID = normalizeMAC(arguments[index])
+		case token == "--ssid":
+			if index+1 >= len(arguments) {
+				return options, errors.New("--ssid 需要网络名，例如 --ssid MyWiFi")
+			}
+
+			index++
+			options.SSID = strings.TrimSpace(arguments[index])
 		case isSniffDuration(token):
 			seconds, err := strconv.Atoi(token)
 			if err != nil || seconds < 0 {
@@ -101,7 +141,7 @@ func ParseSniffArgs(arguments []string) (SniffOptions, error) {
 		case isSniffOutputFile(token):
 			options.OutputPath = token
 		case strings.HasPrefix(token, "-"):
-			return options, fmt.Errorf("无法识别的参数 %q（秒数必须是非负整数）", token)
+			return options, fmt.Errorf("无法识别的参数 %q（支持 --eapol/--pmkid/--bssid/--ssid）", token)
 		default:
 			if options.Interface != "" {
 				return options, fmt.Errorf("无法识别的多余参数 %q", token)
@@ -175,15 +215,28 @@ func runCaptureSession(ctx context.Context, options SniffOptions) error {
 		return err
 	}
 
+	// --eapol：实时分析器与 pcap 落盘共用同一帧流；
+	// --bssid + --ssid 预绑定让以太网视角的候选直接带上 salt。
+	var analyzer *eapol.Analyzer
+	if options.EAPOL {
+		analyzer = eapol.NewAnalyzer(int(source.LinkType()))
+		if options.BSSID != "" && options.SSID != "" {
+			analyzer.SetESSID(options.BSSID, options.SSID)
+		}
+	}
+
 	intro := []string{
 		fmt.Sprintf("抓包接口 %s · 链路类型 %s", options.Interface, linkTypeName(source.LinkType())),
 		fmt.Sprintf("输出文件 %s · 实时行限速 %d 行/秒（完整帧全部入文件）",
 			filepath.Clean(options.OutputPath), sniffLinesPerSecond),
-		"按 Ctrl-C 结束抓包并写入统计",
 	}
+	if analyzer != nil {
+		intro = append(intro, "EAPOL 实时分析已启用：握手/PMKID 候选将即时打印")
+	}
+	intro = append(intro, "按 Ctrl-C 结束抓包并写入统计")
 	utilities.Info("%s", strings.Join(intro, "\n"))
 
-	stats := captureLoop(ctx, source, writer)
+	stats := captureLoop(ctx, source, writer, analyzer, options)
 
 	if err := file.Sync(); err != nil {
 		utilities.Debug("刷盘失败：%v", err)
@@ -194,6 +247,10 @@ func runCaptureSession(ctx context.Context, options SniffOptions) error {
 	}
 
 	printCaptureSummary(options.OutputPath, stats)
+
+	if analyzer != nil {
+		printEAPOLSummary(analyzer.Stats())
+	}
 
 	return nil
 }
@@ -208,7 +265,8 @@ type captureStats struct {
 
 // captureLoop 是主读取循环；仅在空闲超时点检查取消信号，
 // 收到帧时同步写 pcap + 打印摘要，不需要额外协程。
-func captureLoop(ctx context.Context, source capture.Source, writer *pcapfile.Writer) captureStats {
+// analyzer 非空时帧流同时喂给 EAPOL 分析器，候选即时打印。
+func captureLoop(ctx context.Context, source capture.Source, writer *pcapfile.Writer, analyzer *eapol.Analyzer, options SniffOptions) captureStats {
 	stats := captureStats{
 		started:  time.Now(),
 		protocol: make(map[string]int),
@@ -257,6 +315,14 @@ func captureLoop(ctx context.Context, source capture.Source, writer *pcapfile.Wr
 		stats.packets++
 		stats.bytes += len(frame)
 		stats.protocol[summary.Proto]++
+
+		if analyzer != nil {
+			for _, candidate := range analyzer.Feed(frame) {
+				if options.BSSID == "" || candidate.MACAP == options.BSSID {
+					printEAPOLCandidate(candidate)
+				}
+			}
+		}
 
 		budget, suppressed = printSniffLine(stats.packets, summary, len(frame), budget, &refillAt, suppressed)
 	}
@@ -361,6 +427,25 @@ func formatProtocolDistribution(counts map[string]int, limit int) string {
 	}
 
 	return strings.Join(parts, " · ")
+}
+
+// printEAPOLCandidate 打印一条新捕获的破解候选（握手对或 PMKID）。
+// ESSID 缺失时只报事实并指引补 salt——宁缺毋滥，不输出解不开的废 hash。
+func printEAPOLCandidate(candidate eapol.Candidate) {
+	line, err := eapol.Format22000(candidate)
+	if err != nil {
+		utilities.Info("捕获候选 %s（ESSID 未知：加 --ssid 提供 salt 才能产出 hash 行）", candidate)
+
+		return
+	}
+
+	utilities.Info("捕获候选 %s\n    %s", candidate, line)
+}
+
+// printEAPOLSummary 输出 EAPOL 会话统计：各帧合法性（M 分布）与产出规模。
+func printEAPOLSummary(stats eapol.Stats) {
+	utilities.Info("EAPOL 分析：Key 帧 %d（M1 %d · M2 %d · M3 %d · M4 %d）· 完整配对 %d · PMKID 候选 %d",
+		stats.EAPOLFrames, stats.M1Count, stats.M2Count, stats.M3Count, stats.M4Count, stats.Pairs, stats.PMKIDCandidates)
 }
 
 // linkTypeName 给出人类可读的 pcap 链路类型名。

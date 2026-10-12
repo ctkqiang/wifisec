@@ -75,6 +75,21 @@ var helpGroups = []helpGroup{
 			{Signature: "brute <ssid|bssid> with-pass: <字典> [串口]", Summary: "在线密码字典爆破，命中即停"},
 			{Signature: "clone <ssid>:<密码> up [nokick] [串口]", Summary: "克隆同名热点（Evil Twin），Ctrl-C 结束"},
 			{Signature: "clone down [串口]", Summary: "停止固件上的克隆热点"},
+			{Signature: "pmkid <ssid|bssid> [网卡] [-o out.22000] [--ssid 名称] [--attempts N] [--json]", Summary: "主动 PMKID：假客户端关联，产出 hashcat 22000 行"},
+		},
+	},
+	{
+		Title: "无线防御",
+		Note:  "入侵检测，扫描差分免 root，帧级监测需特权",
+		Commands: []helpCommand{
+			{Signature: "ids [SSID] [网卡] [秒数]", Summary: "无线 IDS：伪造AP/KARMA/降级/泛洪/deauth 风暴，可锁定单个 SSID"},
+		},
+	},
+	{
+		Title: "勘测可视化",
+		Note:  "TUI 热力图，免 root",
+		Commands: []helpCommand{
+			{Signature: "heatmap [SSID] [平面图.txt]", Summary: "走位勘测：信号热力图 + AP 方位估计 + 风险徽章"},
 		},
 	},
 	{
@@ -83,7 +98,8 @@ var helpGroups = []helpGroup{
 		Commands: []helpCommand{
 			{Signature: "devices [网卡名]", Summary: "发现局域网在线设备（IP/MAC/主机名/网关角色）"},
 			{Signature: "scan_ports <目标> [端口]", Summary: "nmap 风格 TCP 扫描：open/closed/filtered + banner"},
-			{Signature: "get_packet [网卡] [秒] [文件]", Summary: "连接态抓包导出 pcap，Wireshark 可直接打开"},
+			{Signature: "get_packet [网卡] [秒] [文件] [--eapol] [--pmkid --bssid xx] [--ssid 名称]", Summary: "连接态抓包导出 pcap；--eapol 实时分析握手，--pmkid 主动会话与抓包共存"},
+			{Signature: "extract <capture.pcap> [--hashcat out.22000] [--pmkid out.16800] [--bssid xx] [--ssid 名称] [--json]", Summary: "离线分析 pcap：握手数/PMKID/帧合法性，择优导出 hash 行"},
 		},
 	},
 	{
@@ -105,13 +121,21 @@ var helpExamples = []helpExample{
 	{Command: "wifisec devices", Comment: "局域网在线设备"},
 	{Command: "wifisec scan_ports 192.168.1.1 22,80,8000-8100", Comment: "自定义端口规格"},
 	{Command: "wifisec get_packet en0 30 capture.pcap", Comment: "抓 30 秒并落盘"},
+	{Command: "wifisec get_packet --eapol --ssid 'MyWiFi' 60 eapol.pcap", Comment: "连接态抓包并实时分析握手"},
+	{Command: "wifisec pmkid 01:23:45:67:89:ab -o out.22000", Comment: "主动获取 PMKID（免客户端、免踢人）"},
+	{Command: "wifisec extract capture.pcap --hashcat out.22000", Comment: "离线提取 pcap 中的握手/PMKID 为 hashcat 行"},
+	{Command: "wifisec ids", Comment: "无线入侵检测（sudo 启用帧级监测）"},
+	{Command: "wifisec ids 'MyWiFi'", Comment: "只盯一个 SSID（伪造者/降级/针对它的风暴）"},
+	{Command: "wifisec heatmap 'MyWiFi'", Comment: "走位勘测：空格钉采样，Tab 切换目标"},
 }
 
 // helpDocs 指向仓库内逐命令的深度文档与在线文档站。
 var helpDocs = []helpDoc{
 	{Path: "docs/feature/wifi_deauth.md", Summary: "串口烧录 · deauth/brute/clone 排错"},
 	{Path: "docs/feature/lan_analysis.md", Summary: "局域网三件套原理与授权边界"},
-	{Path: "https://ctkqiang.github.io/wifisec", Summary: "在线文档站"},
+	{Path: "docs/feature/wireless_ids.md", Summary: "无线 IDS 检测器与阈值判读"},
+	{Path: "docs/feature/wifi_pmkid.md", Summary: "PMKID 主动获取与 pcap 离线提取"},
+	{Path: "https://www.ctkqiang.xin/wifisec", Summary: "在线文档站"},
 }
 
 // HelpUsage 输出用法总览。help 文本按惯例绕过 slog 直接写 stdout，
