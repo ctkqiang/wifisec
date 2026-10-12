@@ -7,13 +7,13 @@
   <meta name="keywords" content="WiFi安全,deauth,ESP8266,ESP32,无线安全,渗透测试,网络安全,密码爆破,WiFi brute force,WPA2,无线渗透测试,802.11帧注入,Termux WiFi,免root,红队工具,哪吒网络安全,钟智强,Go,Hexagonal Architecture">
   <meta name="author" content="钟智强 · 哪吒网络安全">
   <meta name="robots" content="index, follow">
-  <link rel="canonical" href="https://ctkqiang.github.io/wifisec/">
+  <link rel="canonical" href="https://www.ctkqiang.xin/wifisec/">
 
   <!-- Open Graph -->
   <meta property="og:type" content="website">
   <meta property="og:title" content="WifiSec — ESP 协处理器 WiFi 安全测试工具">
   <meta property="og:description" content="帧注入跑在 ESP8266/ESP32 上，宿主机零依赖、全平台免 root。Go 编写，Hexagonal Architecture。">
-  <meta property="og:url" content="https://ctkqiang.github.io/wifisec/">
+  <meta property="og:url" content="https://www.ctkqiang.xin/wifisec/">
   <meta property="og:image" content="https://raw.githubusercontent.com/ctkqiang/wifisec/main/docs/logo.svg">
   <meta property="og:locale" content="zh_CN">
   <meta property="og:site_name" content="WifiSec">
@@ -74,6 +74,10 @@
           <a href="#cmd-devices">devices · 设备发现</a>
           <a href="#cmd-scan">scan_ports · 端口扫描</a>
           <a href="#cmd-packet">get_packet · 抓包导出</a>
+          <a href="#cmd-pmkid">pmkid · PMKID 主动获取</a>
+          <a href="#cmd-extract">extract · pcap 离线提取</a>
+          <a href="#cmd-ids">ids · 无线入侵检测</a>
+          <a href="#cmd-heatmap">heatmap · 信号热力图</a>
           <a href="#cmd-help">help · 用法总览</a>
         </div>
         <div class="nav-group">
@@ -350,7 +354,9 @@ wifisec scan_ports 192.168.1.46 22,80,8000-8100  <span class="cmt"># 列表与�
         <p>在<strong>连接态</strong>网卡上抓包导出 pcap，Wireshark/tcpdump 可直接打开。实时行按 Wireshark 列表风格限速 40 行/秒打印（超出只折叠屏幕行，帧数据一个不落全入文件），每 5 秒一行进度，Ctrl-C 或秒数到点后写统计正常收尾。参数按 token 形态归类、顺序随意：纯整数=秒数，带路径分隔符或 <code>.pcap/.cap</code> 后缀=文件，其余=网卡名。</p>
         <pre><code class="lang-bash">wifisec get_packet en0 30 capture.pcap   <span class="cmt"># en0 抓 30 秒落盘</span>
 wifisec get_packet 10                   <span class="cmt"># 默认无线网卡抓 10 秒，文件名自动生成</span>
-wifisec get_packet                      <span class="cmt"># 默认网卡抓到 Ctrl-C</span></code></pre>
+wifisec get_packet                      <span class="cmt"># 默认网卡抓到 Ctrl-C</span>
+wifisec get_packet --eapol --bssid AA:BB:CC:DD:EE:FF 60 eapol.pcap   <span class="cmt"># 抓包同时实时分析 EAPOL 握手，按 BSSID 过滤</span>
+wifisec get_packet --pmkid 'MyWiFi' 60 mixed.pcap   <span class="cmt"># 抓包与 PMKID 主动会话共存（Linux/Windows）</span></code></pre>
         <pre><code class="lang-log">[信息] #154    192.168.1.66:51752 → 192.168.1.255:5700  UDP (211 B)
 [信息] 抓包结束：154 帧 · 52.0 KB · 时长 3.06s
 协议分布：TCP 148 · UDP 6
@@ -368,9 +374,138 @@ Wireshark 打开方式：File → Open → 选择该文件</code></pre>
         </div>
         <div class="alert info">
           <span class="alert-icon">ⓘ</span>
-          <div>抓的是<strong>本机内核视角的以太网帧（DLT 1）</strong>：看得到本机单播与全网/组播，看不到另外两台设备之间的单播（AP 不转发），HTTPS 仍是 TLS 密文。不切 monitor、不断 Wi-Fi；裸 802.11 管理帧属于 ESP 协处理器的 deauth 路线。</div>
+          <div>抓的是<strong>本机内核视角的以太网帧（DLT 1）</strong>：看得到本机单播与全网/组播，看不到另外两台设备之间的单播（AP 不转发），HTTPS 仍是 TLS 密文。不切 monitor、不断 Wi-Fi；裸 802.11 管理帧属于 ESP 协处理器的 deauth 路线。加 <code>--eapol</code> 后同一份流量实时做 EAPOL-Key 解析与 M1-M4 配对（命中即打摘要）；<code>--pmkid</code> 在 Linux/Windows 上另起主动会话，与抓包共存，产物一并落进 pcap 供 <code>extract</code> 离线提取。</div>
         </div>
-        <p>pcap 格式细节、BPF 配置顺序与排错见 <a href="feature/lan_analysis.md">lan_analysis.md §4-§6</a>。</p>
+        <p>pcap 格式细节、BPF 配置顺序与排错见 <a href="feature/lan_analysis.md">lan_analysis.md §4-§6</a>；握手/PMKID 分析见 <a href="feature/wifi_pmkid.md">wifi_pmkid.md</a>。</p>
+      </section>
+
+      <section id="cmd-pmkid">
+        <h2>pmkid · PMKID 主动获取<a class="anchor" href="#cmd-pmkid">#</a></h2>
+        <p>传统抓握手链路（deauth 踢人 → 等客户端重连 → 抓四次握手）在<strong>无客户端在线、客户端不重连、或 AP 启用 802.11w（PMF 保护 deauth 帧）</strong>时全部卡死。PMKID 换了个思路：工具自己当客户端——切到目标信道，发 Open System Authentication + Association Request（随机 STA MAC，RSN IE 声明 PMKID 能力），AP 若在 Association Response / EAPOL Message 1 的 RSN IE 里返回 PMKID 列表，即拿到可离线爆破的材料。全程<strong>不踢任何人、不依赖真实客户端</strong>，SSID 与密码不变则 PMKID 长期有效。</p>
+        <pre><code class="lang-bash">wifisec pmkid AA:BB:CC:DD:EE:FF -o out.22000          <span class="cmt"># 按 BSSID 精确锁定（推荐）</span>
+wifisec pmkid 'MyWiFi' wlan0 -o out.22000             <span class="cmt"># 按 SSID，Linux 原生注入路径</span>
+wifisec pmkid 'MyWiFi' --ssid 'MyWiFi' --attempts 20  <span class="cmt"># 隐藏 SSID 必须显式给 --ssid；加大尝试次数</span></code></pre>
+        <pre><code class="lang-log">[信息] 目标 MyWiFi · BSSID AA:BB:CC:DD:EE:FF · 信道 6 · RSSI -42 dBm
+[信息] 第 1 次尝试 · STA MAC 9a:3e:b2:71:0c:55 → Auth(seq=1) … 收到 Auth(seq=2)
+[信息] 发送 Association Request（RSN IE 声明 PMKID 能力）
+[信息] Association Response: status=0 · RSN IE 携带 PMKID
+[信息] PMKID 命中：0011…eeff（16 字节）
+[完成] 已写出 out.22000（hashcat -m 22000，1 行）</code></pre>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>失败分类</th><th>含义</th><th>出路</th></tr></thead>
+            <tbody>
+              <tr><td><code>no-beacon</code></td><td>目标信道上等不到目标 AP 信标</td><td>确认信道/信号；用 BSSID 而非 SSID 定位</td></tr>
+              <tr><td><code>no-rsn-ie</code></td><td>关联响应无 RSN IE（开放/WEP 网络）</td><td>开放网络无需破解，直接连</td></tr>
+              <tr><td><code>rsn-no-pmkid</code></td><td>RSN IE 存在但 PMKID 列表为空</td><td>AP 未启用 PMK 缓存披露，回落抓握手</td></tr>
+              <tr><td><code>non-psk</code></td><td>AKM 为 802.1X/Enterprise（00-0F-AC:01 等）</td><td>PMKID 派生路径不同，不可用于 PSK 爆破，明确拒绝</td></tr>
+              <tr><td><code>timeout</code></td><td>Auth/Assoc 应答超时</td><td>自动换 STA MAC 重试（默认退避）</td></tr>
+              <tr><td><code>hidden-ssid</code></td><td>信标 SSID 为空且未提供 --ssid</td><td>显式传 --ssid</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="alert info">
+          <span class="alert-icon">ⓘ</span>
+          <div>PMKID 只对 <strong>PSK</strong>（个人版 WPA2/WPA3 过渡）有意义；AKM 非 PSK 时工具明确提示「802.1X/Enterprise，PMKID 不可用于 PSK 爆破」，绝不静默产出废 hash。同名 SSID 多 AP 时按 BSSID/信道/RSSI 成对绑定，严禁只按 SSID 匹配——hash 与错误的 BSSID 绑定就永远解不开。macOS 无公开帧注入 API，此命令走 ESP 协处理器或 Linux/Windows 原生路径。</div>
+        </div>
+        <p>帧流程、RSN IE 状态机偏移表、22000 字段格式与成功率调参见 <a href="feature/wifi_pmkid.md">wifi_pmkid.md</a>。</p>
+      </section>
+
+      <section id="cmd-extract">
+        <h2>extract · pcap 离线提取<a class="anchor" href="#cmd-extract">#</a></h2>
+        <p>把 <code>get_packet</code> / <code>pmkid</code> 产出的 pcap 变成成品：逐 AP 统计<strong>完整握手数、PMKID 有无、各帧合法性</strong>（MIC 存在性、replay counter 单调性），择优导出 hashcat 可直接消费的行。同一 BSSID 同时有 PMKID 与完整握手时<strong>优先 PMKID</strong>（材料干净、无 MIC 区清零的妥协）；ESSID 未能从 beacon/probe/assoc 恢复的候选拒绝产出——空 salt 算不了 PBKDF2，宁可不出也不出废 hash。</p>
+        <pre><code class="lang-bash">wifisec extract capture.pcap                          <span class="cmt"># 只看摘要：握手数/PMKID/帧合法性</span>
+wifisec extract capture.pcap --hashcat out.22000      <span class="cmt"># 择优导出 22000，直接喂 hashcat -m 22000</span>
+wifisec extract capture.pcap --pmkid out.16800        <span class="cmt"># 仅导出 PMKID 行（16800 旧格式）</span>
+wifisec extract capture.pcap --bssid AA:BB:CC:DD:EE:FF --hashcat out.22000   <span class="cmt"># 只处理目标 AP</span>
+wifisec extract capture.pcap --json                   <span class="cmt"># 结构化输出，便于管道化</span></code></pre>
+        <pre><code class="lang-log">pcap 摘要 · 154 帧 · 3 个 BSSID
+BSSID              ESSID      信道  PMKID  完整握手  帧明细
+──────────────────────────────────────────────────────────
+aa:bb:cc:dd:ee:ff  MyWiFi     6     1      1         M1✓ M2✓ M3✓ M4✓
+11:22:33:44:55:66  Neighbor   11    0      0         M1✓ M2✓
+（发现 1 个可离线破解候选；已写出 out.22000 · 1 行）</code></pre>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>导出目标</th><th>格式</th><th>消费方</th></tr></thead>
+            <tbody>
+              <tr><td><code>--hashcat out.22000</code></td><td><code>WPA*01*</code> PMKID 行 / <code>WPA*02*</code> 握手行（依据 hashcat v7.1.2 格式定义，代码内常量 + FormatVersion 开关）</td><td><code>hashcat -m 22000</code></td></tr>
+              <tr><td><code>--pmkid out.16800</code></td><td><code>PMKID:MAC_AP:MAC_STA:ESSID_HEX</code>（旧格式）</td><td><code>hashcat -m 16800</code>（已弃用，兼容保留）</td></tr>
+              <tr><td><code>--json</code></td><td>候选组结构化 JSON（字段与摘要同名）</td><td>管道 / 脚本</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="alert info">
+          <span class="alert-icon">ⓘ</span>
+          <div>隐藏 SSID 的候选会先从 Probe Response / Association Response 恢复 ESSID，恢复不了则标记 <code>&lt;hidden&gt;</code> 并拒绝产出 hash，不会拿空 salt 去算。握手行导出时 MIC 区按规范清零、messagepair 按实际配对类型标注（M1M2=0 / M2M3=2 / M3M4=5 / M1M4=1）。</div>
+        </div>
+        <p>22000 字段顺序、messagepair 规则与 golden 测试说明见 <a href="feature/wifi_pmkid.md">wifi_pmkid.md</a>。</p>
+      </section>
+
+      <section id="cmd-ids">
+        <h2>ids · 无线入侵检测<a class="anchor" href="#cmd-ids">#</a></h2>
+        <p>防御视角模块：持续监测空域，识别<strong>伪造 AP、KARMA、加密降级、泛洪、deauth 风暴、弱加密与开放网络</strong>。两层引擎——扫描差分（每 15 秒对比快照，免 root 全平台）+ 帧级监测（Linux monitor VIF / macOS BPF，尽力而为、不可用时如实降级）。告警按严重（红）/警告（黄）/提示（灰）着色，每条带触发证据。</p>
+        <pre><code class="lang-bash">wifisec ids                <span class="cmt"># 全空域持续监测到 Ctrl-C</span>
+wifisec ids 3600           <span class="cmt"># 监测 1 小时后自动收尾</span>
+wifisec ids 'MyWiFi'       <span class="cmt"># 锁定单个 SSID：只评估它的差分与针对它的风暴</span>
+wifisec ids en0            <span class="cmt"># 指定帧级监测绑定的网卡</span></code></pre>
+        <pre><code class="lang-log">[严重] 14:32:01 伪造AP · MyWiFi — SSID 出现第二个 BSSID BB:00:…（信道 6 · WPA2），疑似 Evil Twin
+[严重] 14:33:40 去认证风暴 · AA:00:… — 10 秒内 12 帧（阈值 12），目标为本机——你的连接正在被强制断开
+[信息] 检测结束：追踪 12 个 BSSID · deauth 47 帧 · disassoc 0 帧 · 告警 2 条
+[警告] 重点来源 AA:00:…：deauth×47 · disassoc×0</code></pre>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>检测器</th><th>层面</th><th>等级</th><th>阈值</th></tr></thead>
+            <tbody>
+              <tr><td>伪造 AP（Evil Twin）</td><td>扫描差分</td><td>警告</td><td>同 SSID 同频段新 BSSID 且信道/加密不一致（双频合一拓扑豁免）</td></tr>
+              <tr><td>KARMA</td><td>扫描差分</td><td>严重</td><td>同一 BSSID 宣称 ≥6 个 SSID</td></tr>
+              <tr><td>加密降级</td><td>扫描差分</td><td>严重</td><td>安全等级下跌（WPA3→WEP 等）</td></tr>
+              <tr><td>去认证/解除关联风暴</td><td>帧级监测</td><td>严重</td><td>≥12 帧 / 10 秒 / 发送方</td></tr>
+              <tr><td>信标泛洪</td><td>两层</td><td>严重</td><td>单轮 30 个新 BSSID 或 10 秒 40 发送方</td></tr>
+              <tr><td>弱加密 / 开放网络</td><td>扫描差分</td><td>警告/提示</td><td>WEP、WPA/TKIP、OPEN（每 BSSID 一次）</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="alert info">
+          <span class="alert-icon">ⓘ</span>
+          <div>macOS 未授权定位时系统隐藏周边 BSSID，差分检测退化为仅安全盘点（系统设置 → 定位服务 → 允许 wifisec）。连接态以太网视角（DLT 1）下管理帧不可见，帧级监测会如实降级为纯扫描差分。部署位置决定合法性边界，检测记录只用于防护目的。</div>
+        </div>
+        <p>检测器原理、阈值出处与企业部署形态见 <a href="feature/wireless_ids.md">wireless_ids.md</a>。</p>
+      </section>
+
+      <section id="cmd-heatmap">
+        <h2>heatmap · 信号热力图<a class="anchor" href="#cmd-heatmap">#</a></h2>
+        <p>把无线数据变成平面图：纯终端 TUI 站点勘测。拿着笔记本在房间里走动，每到一个位置按一次空格，工具把该点的 RSSI 钉进网格；未采样的格子按 <strong>IDW（1/d² 反距离加权）</strong> 插值出色块，超半径的死角留白不编造。可叠加文本平面图（墙体/工位），最多同时追踪 9 个 AP（Tab 切换、各自独立网格），加密风险以角标形式随目标列出；结束自动落盘 JSON 并给出 AP 方位估计（信号最强格）。</p>
+        <pre><code class="lang-bash">wifisec heatmap                    <span class="cmt"># 对当前最强网络开测</span>
+wifisec heatmap 'MyWiFi'           <span class="cmt"># 指定 SSID</span>
+wifisec heatmap 'MyWiFi' floor.txt <span class="cmt"># 叠加平面图（#=墙 空格=可走区域）</span></code></pre>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>按键</th><th>作用</th><th>按键</th><th>作用</th></tr></thead>
+            <tbody>
+              <tr><td><code>h j k l</code> / 方向键</td><td>移动光标（你站的位置）</td><td><code>空格</code> / <code>回车</code></td><td>在当前格采样一次 RSSI</td></tr>
+              <tr><td><code>Tab</code></td><td>切换勘测目标 AP</td><td><code>x</code></td><td>清除当前格采样</td></tr>
+              <tr><td><code>s</code></td><td>立即保存 JSON</td><td><code>q</code> / <code>Ctrl-C</code></td><td>结束并自动落盘 + 统计</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>等级</th><th>RSSI</th><th>色块</th><th>含义</th></tr></thead>
+            <tbody>
+              <tr><td>极佳</td><td>≥ -50 dBm</td><td>绿色</td><td>贴着 AP 的覆盖区</td></tr>
+              <tr><td>良好</td><td>-50 ~ -60</td><td>黄绿</td><td>正常办公无压力</td></tr>
+              <tr><td>一般</td><td>-60 ~ -70</td><td>金色</td><td>可用，视频会偶发卡顿</td></tr>
+              <tr><td>偏弱</td><td>-70 ~ -80</td><td>橙色</td><td>边缘覆盖，考虑增补点位</td></tr>
+              <tr><td>死角</td><td>&lt; -80 / 无数据</td><td>红色</td><td>基本不可用</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="alert info">
+          <span class="alert-icon">ⓘ</span>
+          <div>插值是<strong>估计</strong>不是测量：1/d² 是自由空间衰减的近似，穿墙衰减、多径与人体遮挡都会让实际值偏离色块。要准确结论就多在关键位置按空格——精确采样永远优先于插值显示。macOS 未授权定位时 BSSID 被系统隐藏，多 AP 目标会按 SSID 匹配采样。</div>
+        </div>
+        <p>IDW 原理与诚实边界、JSON 落盘格式、AP 方位估计的局限见 <a href="feature/wifi_heatmap.md">wifi_heatmap.md</a>。</p>
       </section>
 
       <section id="cmd-help">

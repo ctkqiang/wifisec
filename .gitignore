@@ -13,3 +13,5 @@ build/
 # 产物
 *.exe
 docs/公众号/*
+
+*.pcap

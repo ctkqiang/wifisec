@@ -103,7 +103,7 @@ WifiSec 是 Go 编写的无线安全测试工具，采用 Hexagonal Architecture
 
 ```mermaid
 flowchart TB
-    CLI["cmd/wifisec/main.go<br/>命令路由: list / serial / deauth / brute / clone / devices / scan_ports / get_packet / help"] --> APP["internal/functions<br/>应用编排: deauther · brute · clone · devices · portscan · sniff · lists · serial"]
+    CLI["cmd/wifisec/main.go<br/>命令路由: list / serial / deauth / brute / clone / devices / scan_ports / get_packet / pmkid / extract / ids / help"] --> APP["internal/functions<br/>应用编排: deauther · brute · clone · devices · portscan · sniff · pmkid · extract · ids · lists · serial"]
     APP -->|"端口: frameWriter<br/>channelSetter"| ESP["internal/platform/esp<br/>串口帧协议 · 复位时序 · 噪声重同步"]
     APP -->|"端口: 无线扫描"| DAR["darwin · CoreWLAN"]
     APP --> LIN["linux · iw + AF_PACKET<br/>termux · Android API"]
@@ -112,6 +112,8 @@ flowchart TB
     ESP -->|"115200 8N1"| HW["ESP8266 / ESP32<br/>core/esp/esp.ino"]
     IEEE["internal/ieee80211<br/>deauth 帧纯字节编解码"] -.-> APP
     PCAP["internal/pcapfile + ethernet<br/>pcap 写入器 · 帧摘要"] -.-> LAN
+    WIDS["internal/wids<br/>无线 IDS 纯检测引擎<br/>快照差分 + 帧滑窗计数"] -.-> APP
+    PMK["internal/rsnie · eapol · pmkid<br/>RSN IE 状态机 · EAPOL M1-M4 配对<br/>PMKID 主动获取 · hashcat 22000/16800"] -.-> APP
     ESP --> HW2["射频注入<br/>wifi_send_pkt_freedom / esp_wifi_80211_tx"]
 ```
 
@@ -131,6 +133,11 @@ wifisec clone down [串口]                 # 停止固件上的克隆热点
 wifisec devices [网卡名]                  # 列出当前局域网在线设备（IP/MAC/主机名/网关），免 root
 wifisec scan_ports <目标> [端口]          # nmap 风格 TCP 扫描：open/closed/filtered + banner
 wifisec get_packet [网卡] [秒] [文件]     # 抓包导出 pcap（Wireshark 直读），Ctrl-C 结束
+wifisec get_packet --eapol [网卡] [秒] [文件]   # 同上，实时分析 EAPOL 握手并按 --bssid/--ssid 过滤
+wifisec pmkid <ssid|bssid> [网卡] [-o out.22000]   # 主动获取 PMKID（免客户端、免踢人），产出 hashcat 22000 行
+wifisec extract capture.pcap [--hashcat out.22000] [--pmkid out.16800]   # 离线分析 pcap：握手数/PMKID/帧合法性，择优导出
+wifisec ids [SSID] [网卡] [秒数]          # 无线入侵检测：伪造AP/KARMA/降级/泛洪/deauth 风暴，可锁定单个 SSID
+wifisec heatmap [SSID] [平面图.txt]       # TUI 信号热力图：走位采样 + IDW 插值 + AP 方位估计，免 root
 wifisec help                              # 用法总览
 ```
 
@@ -143,7 +150,11 @@ wifisec help                              # 用法总览
 | `clone`   | 热点克隆（Evil Twin）：同名同密码 SoftAP + 可选 kick 驱赶真实 AP 客户端（ESP 协处理器；无设备时回落 Linux hostapd） | [wifi_clone.md](docs/feature/wifi_clone.md) |
 | `devices` | 局域网设备发现：TCP 探针刷 ARP + 系统邻居表交叉，输出 IP/MAC/主机名/角色，四平台免 root | [lan_analysis.md](docs/feature/lan_analysis.md) |
 | `scan_ports` | nmap 风格 TCP connect 扫描（200 并发、1.5s 超时），open/closed/filtered 三态 + 被动 banner 抓取，四平台免 root | [lan_analysis.md](docs/feature/lan_analysis.md) |
-| `get_packet` | 连接态网卡抓包：Linux AF_PACKET / macOS BPF / Windows Npcap，实时摘要限速打印，全帧写 pcap 供 Wireshark 分析 | [lan_analysis.md](docs/feature/lan_analysis.md) |
+| `get_packet` | 连接态网卡抓包：Linux AF_PACKET / macOS BPF / Windows Npcap，实时摘要限速打印，全帧写 pcap 供 Wireshark 分析；`--eapol` 实时分析握手，`--pmkid` 主动会话与抓包共存 | [lan_analysis.md](docs/feature/lan_analysis.md) · [wifi_pmkid.md](docs/feature/wifi_pmkid.md) |
+| `pmkid` | PMKID 主动获取：假客户端发 Auth+Assoc 抓 RSN IE 中的 PMKID，免客户端、免踢人、不怕 802.11w，产出 hashcat 22000 行 | [wifi_pmkid.md](docs/feature/wifi_pmkid.md) |
+| `extract` | pcap 离线提取：握手数 / PMKID 有无 / 各帧合法性，同一 AP 双证据时优先 PMKID，`--hashcat`/`--pmkid`/`--json` 导出 | [wifi_pmkid.md](docs/feature/wifi_pmkid.md) |
+| `ids` | 无线入侵检测：扫描差分（伪造AP/KARMA/加密降级/弱加密盘点，免 root）+ 帧级监测（deauth 风暴/信标泛洪，需特权），防御视角 | [wireless_ids.md](docs/feature/wireless_ids.md) |
+| `heatmap` | TUI 信号热力图：走位勘测（空格钉采样、IDW 插值成面、AP 方位估计、风险徽章），退出自动落盘 JSON，免 root | [wifi_heatmap.md](docs/feature/wifi_heatmap.md) |
 | 文档站    | HTML/JS/CSS 静态文档        | [docs/index.html](docs/index.html)（Arco Design 风格）   |
 
 ---
@@ -184,15 +195,20 @@ wifisec help                              # 用法总览
 
 ```
 wifisec/
-├── cmd/wifisec/main.go                  # 入口：命令注册与路由（list/serial/deauth/brute/clone/devices/scan_ports/get_packet/help）
+├── cmd/wifisec/main.go                  # 入口：命令注册与路由（list/serial/deauth/brute/clone/devices/scan_ports/get_packet/pmkid/extract/ids/help）
 ├── core/esp/esp.ino                     # 协处理器固件（ESP8266/ESP32 全系，编译期条件分支）
 ├── internal/
 │   ├── constants/                       # 开发者元数据等常量
-│   ├── functions/                       # 应用编排：deauther · connect(brute) · clone · devices · portscan · sniff · lists · serial · help
+│   ├── functions/                       # 应用编排：deauther · connect(brute) · clone · devices · portscan · sniff · pmkid · extract · ids · lists · serial · help
 │   ├── ethernet/frame.go                # 局域网抓包帧摘要（ARP/IPv4/IPv6/TCP/UDP/ICMP/EAPOL/LLDP）
 │   ├── ieee80211/frame.go               # deauth 帧纯字节编解码（与介质解耦，可独立单测）
+│   ├── rsnie/parse.go                   # RSN IE(0x30) 状态机解析：密码套件/AKM/RSN 能力/PMKID 列表，malformed 即弃
+│   ├── eapol/                           # EAPOL-Key 帧解析与 M1-M4 配对，归一 Candidate → hashcat 22000/16800
+│   ├── pmkid/client.go                  # PMKID 主动获取状态机（随机 STA MAC · 重试退避 · 失败分类）
 │   ├── model/                           # wifi / command / author 领域模型
 │   ├── pcapfile/pcap.go                 # 纯 Go pcap v2.4 写入器（Wireshark/tcpdump 直读）
+│   ├── heatmap/survey.go                # 走位勘测纯数据层（网格采样 · IDW 插值 · JSON 落盘）
+│   ├── wids/wids.go                     # 无线 IDS 纯检测引擎（快照差分 + 帧滑窗计数，可注入测试）
 │   ├── platform/
 │   │   ├── darwin/                      # CoreWLAN 扫描 + reexec（TCC 定位授权 bundle）
 │   │   ├── esp/esp.go                   # 串口帧协议 · 复位时序 · 噪声重同步 · 能力位图
@@ -210,7 +226,7 @@ wifisec/
 │   ├── logo.svg                         # 项目 Logo
 │   ├── src/style/ · src/scripts/        # 文档站样式（SCSS 源 + 编译产物）与交互脚本
 │   ├── diagram/                         # PlantUML：执行流程 + 串口协议时序
-│   └── feature/                         # wifi_list / wifi_serial / wifi_deauth / wifi_brute_force / wifi_clone / lan_analysis 详细文档
+│   └── feature/                         # wifi_list / wifi_serial / wifi_deauth / wifi_brute_force / wifi_clone / lan_analysis / wireless_ids / wifi_heatmap / wifi_pmkid 详细文档
 ├── Makefile                             # build / list / test / 等构建编排
 └── .githooks/                           # Conventional Commits 提交信息校验钩子
 ```
