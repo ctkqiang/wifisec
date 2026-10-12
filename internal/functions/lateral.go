@@ -1,7 +1,7 @@
-// lateral.go 是 `wifisec agent` 与 `wifisec shell/<ip>` 的命令编排层。
+// lateral.go 是 `wifisec bind` 与 `wifisec shell/<ip>` 的命令编排层。
 //
 // 两条入口：
-//   - 被控端：wifisec agent [--port N] [--token 令牌] [--timeout 秒]
+//   - 被控端：wifisec bind [--port N] [--token 令牌] [--timeout 秒]
 //   - 控制端：wifisec shell <主机> [命令...] 与 wifisec <ip> [命令...]
 //     （后者由 argv.go 对首参做 IP 嗅探路由而来）
 //
@@ -49,9 +49,9 @@ func ParseLateralArgs(arguments []string) (string, int, string, []string, error)
 	return config.host, config.port, config.token, config.command, err
 }
 
-// RunAgent 启动被控端：监听 TCP 等待控制端接入并执行下发命令。
-func RunAgent(arguments []string) error {
-	port, token, timeout, err := parseAgentArgs(arguments)
+// RunBind 启动被控端：监听 TCP 等待控制端接入并执行下发命令。
+func RunBind(arguments []string) error {
+	port, token, timeout, err := parseBindArgs(arguments)
 	if err != nil {
 		return err
 	}
@@ -71,10 +71,10 @@ func RunAgent(arguments []string) error {
 		return fmt.Errorf("监听 %d 端口失败：%w", port, err)
 	}
 
-	utilities.Warn("横向移动 agent 仅限自有网络或已获书面授权的环境使用")
-	utilities.Info("agent 已监听 :%d · 命令超时 %s · Ctrl-C 退出", port, timeout)
+	utilities.Warn("横向移动 bind 服务仅限自有网络或已获书面授权的环境使用")
+	utilities.Info("bind 已监听 :%d · 命令超时 %s · Ctrl-C 退出", port, timeout)
 
-	return lateral.NewAgent(listener, token, timeout).Serve()
+	return lateral.NewBind(listener, token, timeout).Serve()
 }
 
 // RunShellClient 是控制端入口：交互会话或单命令一步执行。
@@ -190,8 +190,8 @@ func parseLateralArgs(arguments []string) (lateralConfig, error) {
 	return config, nil
 }
 
-// parseAgentArgs 解析被控端参数：--port/--token/--timeout。
-func parseAgentArgs(arguments []string) (int, string, time.Duration, error) {
+// parseBindArgs 解析被控端参数：--port/--token/--timeout。
+func parseBindArgs(arguments []string) (int, string, time.Duration, error) {
 	port := lateral.DefaultPort
 	token := os.Getenv(tokenEnvVar)
 	timeout := 60 * time.Second

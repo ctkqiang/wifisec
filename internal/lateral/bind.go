@@ -1,4 +1,4 @@
-// agent.go 实现被控端：监听 TCP、完成认证后循环执行控制端下发的命令。
+// bind.go 实现被控端：监听 TCP、完成认证后循环执行控制端下发的命令。
 //
 // 执行语义：
 //   - Unix 经 /bin/sh -c、Windows 经 cmd /C 解释命令，与交互 shell 行为一致；
@@ -19,8 +19,8 @@ import (
 	"github.com/ctkqiang/wifisec/internal/utilities"
 )
 
-// Agent 是被控端实例：持有监听器与认证令牌，Serve 循环接入控制端。
-type Agent struct {
+// Bind 是被控端实例：持有监听器与认证令牌，Serve 循环接入控制端。
+type Bind struct {
 	listener net.Listener
 	token    string
 	timeout  time.Duration
@@ -33,22 +33,22 @@ type frameSink struct {
 	mu   *sync.Mutex
 }
 
-// NewAgent 在已就绪的监听器上构建 agent。
+// NewBind 在已就绪的监听器上构建 bind 服务。
 // 监听器的创建与端口解析留给调用方，测试因此可以绑定 127.0.0.1:0。
-func NewAgent(listener net.Listener, token string, timeout time.Duration) *Agent {
-	return &Agent{listener: listener, token: token, timeout: timeout}
+func NewBind(listener net.Listener, token string, timeout time.Duration) *Bind {
+	return &Bind{listener: listener, token: token, timeout: timeout}
 }
 
 // Serve 阻塞式接入循环：每个连接独立 goroutine 处理，
-// 单个控制端断开或出错不影响 agent 继续服务后续接入。
-func (agent *Agent) Serve() error {
+// 单个控制端断开或出错不影响 bind 继续服务后续接入。
+func (bind *Bind) Serve() error {
 	for {
-		conn, err := agent.listener.Accept()
+		conn, err := bind.listener.Accept()
 		if err != nil {
 			return fmt.Errorf("接受连接失败：%w", err)
 		}
 
-		go agent.handleConn(conn)
+		go bind.handleConn(conn)
 	}
 }
 
@@ -67,10 +67,10 @@ func (sink frameSink) Write(payload []byte) (int, error) {
 
 // handleConn 服务单个控制端连接：认证 → 命令循环 → 清理。
 // 命令帧长度为 0 表示控制端主动结束会话。
-func (agent *Agent) handleConn(conn net.Conn) {
+func (bind *Bind) handleConn(conn net.Conn) {
 	defer conn.Close()
 
-	if err := serverAuth(conn, agent.token); err != nil {
+	if err := serverAuth(conn, bind.token); err != nil {
 		utilities.Warn("横向移动认证失败（%s）：%v", conn.RemoteAddr(), err)
 		return
 	}
@@ -88,14 +88,14 @@ func (agent *Agent) handleConn(conn net.Conn) {
 			return
 		}
 
-		agent.execute(conn, string(command))
+		bind.execute(conn, string(command))
 	}
 }
 
 // execute 运行单条命令并把输出流式回传，结束后发「空帧 + 退出码」。
 // 输出结束帧在前、退出码在后，控制端据此区分输出块与结果元数据。
-func (agent *Agent) execute(conn net.Conn, command string) {
-	ctx, cancel := context.WithTimeout(context.Background(), agent.timeout)
+func (bind *Bind) execute(conn net.Conn, command string) {
+	ctx, cancel := context.WithTimeout(context.Background(), bind.timeout)
 	defer cancel()
 
 	cmd := buildCommand(ctx, command)

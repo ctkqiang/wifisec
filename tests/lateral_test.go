@@ -1,5 +1,5 @@
 // lateral_test.go 横向移动通道的黑盒测试：
-// 参数解析表驱动 + agent/client 本机回环端到端全链路。
+// 参数解析表驱动 + bind/client 本机回环端到端全链路。
 // 全部无硬件依赖，localhost 自对话即可跑，CI 无需任何特权。
 package tests
 
@@ -118,15 +118,15 @@ func TestParseLateralArgsEnvToken(t *testing.T) {
 	}
 }
 
-func TestAgentClientEndToEnd(t *testing.T) {
+func TestBindClientEndToEnd(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("监听失败：%v", err)
 	}
 	defer listener.Close()
 
-	agent := lateral.NewAgent(listener, "e2e-token", 10*time.Second)
-	go agent.Serve() //nolint:errcheck — 测试进程随用例结束，Serve 错误无需断言
+	bind := lateral.NewBind(listener, "e2e-token", 10*time.Second)
+	go bind.Serve() //nolint:errcheck — 测试进程随用例结束，Serve 错误无需断言
 
 	client, err := lateral.Dial(listener.Addr().String(), "e2e-token")
 	if err != nil {
@@ -181,8 +181,8 @@ func TestAgentClientEndToEnd(t *testing.T) {
 		}
 		defer slowListener.Close()
 
-		slowAgent := lateral.NewAgent(slowListener, "e2e-token", 150*time.Millisecond)
-		go slowAgent.Serve() //nolint:errcheck — 同上
+		slowBind := lateral.NewBind(slowListener, "e2e-token", 150*time.Millisecond)
+		go slowBind.Serve() //nolint:errcheck — 同上
 
 		slowClient, err := lateral.Dial(slowListener.Addr().String(), "e2e-token")
 		if err != nil {
@@ -201,15 +201,15 @@ func TestAgentClientEndToEnd(t *testing.T) {
 	})
 }
 
-func TestAgentRejectsWrongToken(t *testing.T) {
+func TestBindRejectsWrongToken(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("监听失败：%v", err)
 	}
 	defer listener.Close()
 
-	agent := lateral.NewAgent(listener, "real-token", 10*time.Second)
-	go agent.Serve() //nolint:errcheck — 同上
+	bind := lateral.NewBind(listener, "real-token", 10*time.Second)
+	go bind.Serve() //nolint:errcheck — 同上
 
 	if _, err := lateral.Dial(listener.Addr().String(), "bad-token"); !errors.Is(err, lateral.ErrAuthFailed) {
 		t.Fatalf("错误令牌应返回 ErrAuthFailed，实际：%v", err)
