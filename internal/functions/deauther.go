@@ -4,18 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
 	"github.com/ctkqiang/wifisec/internal/constants"
+	"github.com/ctkqiang/wifisec/internal/gui"
 	"github.com/ctkqiang/wifisec/internal/ieee80211"
 	platformesp "github.com/ctkqiang/wifisec/internal/platform/esp"
 	platformlinux "github.com/ctkqiang/wifisec/internal/platform/linux"
 	platformwindows "github.com/ctkqiang/wifisec/internal/platform/windows"
 	"github.com/ctkqiang/wifisec/internal/security"
 	"github.com/ctkqiang/wifisec/internal/utilities"
-	"net"
-	"os/signal"
-	"strings"
-	"syscall"
-	"time"
 )
 
 const (
@@ -188,7 +190,7 @@ func selectESPTargets(scanned []platformesp.Network, target string, targetMAC ne
 //   - Termux 需要 root（tsu/su）且芯片固件支持 monitor（nexmon 或原生）
 //   - Termux 的 iw 可能不在默认 PATH，错误提示需引导安装 root-repo
 func deauthLinux(arguments []string) error {
-	if err := (security.RootChecker{}).Check(); err != nil {
+	if err := checkRootWithGUI(); err != nil {
 		return err
 	}
 
@@ -260,7 +262,7 @@ func deauthLinux(arguments []string) error {
 // 通过 wpcap.dll 注入帧，通过 WlanHelper.exe 切换 monitor 模式与信道。
 // 需要管理员权限；普通用户打开 Npcap 句柄会被驱动拒绝。
 func deauthWindows(arguments []string) error {
-	if err := (security.AdminChecker{}).Check(); err != nil {
+	if err := checkAdminWithGUI(); err != nil {
 		return err
 	}
 
@@ -586,4 +588,30 @@ func runDeauthLoop(ctx context.Context, injector frameWriter, setChannel channel
 func setupSignalHandler() (context.Context, context.CancelFunc) {
 	signal.Reset(syscall.SIGINT, syscall.SIGTERM)
 	return signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+}
+
+// checkRootWithGUI 在权限不足时先弹 GUI 提示再返回错误。
+// Linux 调用 zenity/kdialog，无 GUI 前端时静默回退到终端文本。
+func checkRootWithGUI() error {
+	if err := (security.RootChecker{}).Check(); err != nil {
+		gui.ShowPermissionDialog(
+			"wifisec 需要 root 权限",
+			"此操作需要 root 权限或 CAP_NET_RAW/CAP_NET_ADMIN。\n请使用 sudo 运行：\n  sudo wifisec <命令>",
+		)
+		return err
+	}
+	return nil
+}
+
+// checkAdminWithGUI 在权限不足时先弹 GUI 提示再返回错误。
+// Windows 调用 MessageBoxW 弹出系统级提示窗。
+func checkAdminWithGUI() error {
+	if err := (security.AdminChecker{}).Check(); err != nil {
+		gui.ShowPermissionDialog(
+			"wifisec 需要管理员权限",
+			"此操作需要管理员权限和 Npcap 驱动。\n请以管理员身份运行终端。",
+		)
+		return err
+	}
+	return nil
 }

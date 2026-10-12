@@ -33,7 +33,6 @@ import (
 	platformlinux "github.com/ctkqiang/wifisec/internal/platform/linux"
 	platformwindows "github.com/ctkqiang/wifisec/internal/platform/windows"
 	"github.com/ctkqiang/wifisec/internal/pmkid"
-	"github.com/ctkqiang/wifisec/internal/security"
 	"github.com/ctkqiang/wifisec/internal/utilities"
 )
 
@@ -201,7 +200,7 @@ func openPMKIDSession(options PMKIDOptions, targetMAC net.HardwareAddr) (*pmkidS
 // openPMKIDSessionLinux 准备 Linux/Android(Termux) 的会话资源：
 // monitor VIF 上同时开读帧（AF_PACKET）与注入（AF_PACKET），全程 root。
 func openPMKIDSessionLinux(options PMKIDOptions, targetMAC net.HardwareAddr) (*pmkidSession, error) {
-	if err := (security.RootChecker{}).Check(); err != nil {
+	if err := checkRootWithGUI(); err != nil {
 		return nil, err
 	}
 
@@ -285,7 +284,7 @@ func openPMKIDSessionLinux(options PMKIDOptions, targetMAC net.HardwareAddr) (*p
 // 句柄——读帧走 capture 层（radiotap 视角），注入走 platformwindows
 // 注入器；monitor 切换与恢复镜像 deauthWindows 的序列。
 func openPMKIDSessionWindows(options PMKIDOptions, targetMAC net.HardwareAddr) (*pmkidSession, error) {
-	if err := (security.AdminChecker{}).Check(); err != nil {
+	if err := checkAdminWithGUI(); err != nil {
 		return nil, err
 	}
 

@@ -95,6 +95,8 @@ WifiSec 是 Go 编写的无线安全测试工具，采用 Hexagonal Architecture
 
 > macOS 用户走协处理器路径即可：插一块 ESP8266 开发板（约十元），烧录固件后全部功能免 root 可用，同时绕过系统对 BSSID 的定位脱敏。
 
+权限不足时（非 root / 非管理员），命令启动前自动弹出 GUI 提示窗说明所需权限：Linux 走 zenity/kdialog（桌面环境缺失时静默回退终端文本），Windows 走 MessageBoxW；macOS 首次定位授权先弹品牌预提示窗（WiFi Logo + 授权说明），系统弹窗期间显示等待窗。
+
 ---
 
 ## 系统架构
