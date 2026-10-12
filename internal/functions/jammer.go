@@ -30,6 +30,12 @@ const jamInterval = 200 * time.Millisecond
 // jamAllKeyword 是触发全打模式的关键字。
 const jamAllKeyword = "all"
 
+// maxWriteFailStreak 是连续写入失败多少帧后判定串口设备已掉线。
+// 板载射频满功率发送时电流可达 300mA+，USB 供电不足或过流保护
+// 会让设备直接从总线消失；此时 Write 持续报错，必须主动终止而不是
+// 无限告警空转——后者正是「工具看着像卡死」错觉的来源。
+const maxWriteFailStreak = 10
+
 // errNoESPDevice 是 EMBEDDED_MODE 下未探测到协处理器时的回落信号：
 // RunJammer 捕获它后转走本机网卡路径，而不是把"没插板"当成致命错误。
 // 用户显式指定串口时不会产生此信号，忠于用户意图直接报错。
@@ -458,13 +464,15 @@ func runJamLoop(ctx context.Context, injector frameWriter, setChannel channelSet
 
 	started := time.Now()
 	sent := 0
+	failStreak := 0
+	portDead := false
 
 	progress := time.NewTicker(progressInterval)
 	defer progress.Stop()
 
 	for {
 		for _, t := range targets {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || portDead {
 				break
 			}
 
@@ -473,17 +481,35 @@ func runJamLoop(ctx context.Context, injector frameWriter, setChannel channelSet
 				continue
 			}
 
+			// 连续失败只告警首次：设备掉线后每秒会涌现上百条相同告警，
+			// 刷屏无信息量；熔断后的明确结论交给循环外的 Error 输出。
 			if err := injector.Write(t.deauthFrm); err != nil {
-				utilities.Warn("发送 deauth 帧失败（%s）：%v", t.bssid, err)
+				if failStreak == 0 {
+					utilities.Warn("发送 deauth 帧失败（%s）：%v", t.bssid, err)
+				}
+				failStreak++
+				portDead = failStreak >= maxWriteFailStreak
 				continue
 			}
+			failStreak = 0
 			sent++
 
 			if err := injector.Write(t.disassFrm); err != nil {
-				utilities.Warn("发送 disassoc 帧失败（%s）：%v", t.bssid, err)
+				if failStreak == 0 {
+					utilities.Warn("发送 disassoc 帧失败（%s）：%v", t.bssid, err)
+				}
+				failStreak++
+				portDead = failStreak >= maxWriteFailStreak
 				continue
 			}
+			failStreak = 0
 			sent++
+		}
+
+		if portDead {
+			utilities.Error("连续 %d 帧写入失败，串口设备可能已从 USB 掉线（射频电流过流或被拔出），请重新插板并用 wifisec serial 确认",
+				failStreak)
+			break
 		}
 
 		select {
@@ -497,6 +523,10 @@ func runJamLoop(ctx context.Context, injector frameWriter, setChannel channelSet
 		case <-time.After(jamInterval):
 		}
 	}
+
+	// 熔断退出同样输出统计，与 Ctrl-C 的收尾保持一致。
+	utilities.Info("已发送 %d 帧（deauth+disassoc）· 目标 %d 个 · 运行 %s",
+		sent, len(targets), time.Since(started).Round(time.Second))
 }
 
 // setupJamSignalHandler 接管 SIGINT/SIGTERM，与 deauther 的逻辑一致。
