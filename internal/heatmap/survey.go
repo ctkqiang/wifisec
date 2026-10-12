@@ -36,6 +36,32 @@ const (
 // 绿→黄绿→金→橙→红，色弱用户也能按亮度递增读图。
 var levelColors = [5]int{196, 208, 220, 112, 46}
 
+// Survey 是一次走位勘测的全部状态。
+// Cells 的键为 row*Cols+col，值为 dBm（负值）。
+type Survey struct {
+	SSID      string        `json:"ssid"`  // 目标网络
+	BSSID     string        `json:"bssid"` // 目标 AP（macOS 隐藏时为空，按 SSID 采样）
+	Cols      int           `json:"cols"`  // 网格列数（每格 2 字符宽）
+	Rows      int           `json:"rows"`  // 网格行数
+	Cells     map[int]int   `json:"cells"` // 采样点
+	Plan      []string      `json:"plan"`  // 可选平面图背景（逐行字符）
+	StartedAt time.Time     `json:"started_at"`
+	updated   map[int]int64 // 内部：采样时间戳（毫秒），不入 JSON
+}
+
+// surveyJSON 是落盘格式：cells 展开为 "row,col" 字符串键，
+// 比内部 int 键可读、可手工修补，也方便其他工具消费。
+type surveyJSON struct {
+	SSID      string         `json:"ssid"`
+	BSSID     string         `json:"bssid"`
+	Cols      int            `json:"cols"`
+	Rows      int            `json:"rows"`
+	Cells     map[string]int `json:"cells"`
+	Plan      []string       `json:"plan,omitempty"`
+	StartedAt time.Time      `json:"started_at"`
+	SavedAt   time.Time      `json:"saved_at"`
+}
+
 // LevelColor 返回分级对应的 ANSI 256 色号，渲染层直接取用。
 func LevelColor(level int) int {
 	if level < LevelDead {
@@ -74,19 +100,6 @@ func RSSILevel(rssi int) int {
 // cellKey 把 (col,row) 折叠成 map 键。
 func cellKey(col, row, cols int) int {
 	return row*cols + col
-}
-
-// Survey 是一次走位勘测的全部状态。
-// Cells 的键为 row*Cols+col，值为 dBm（负值）。
-type Survey struct {
-	SSID      string        `json:"ssid"`  // 目标网络
-	BSSID     string        `json:"bssid"` // 目标 AP（macOS 隐藏时为空，按 SSID 采样）
-	Cols      int           `json:"cols"`  // 网格列数（每格 2 字符宽）
-	Rows      int           `json:"rows"`  // 网格行数
-	Cells     map[int]int   `json:"cells"` // 采样点
-	Plan      []string      `json:"plan"`  // 可选平面图背景（逐行字符）
-	StartedAt time.Time     `json:"started_at"`
-	updated   map[int]int64 // 内部：采样时间戳（毫秒），不入 JSON
 }
 
 // NewSurvey 创建勘测。plan 可为 nil；行数超出网格的部分裁剪，
@@ -227,19 +240,6 @@ func (survey *Survey) Stats() (minRSSI, avgRSSI, maxRSSI int) {
 	}
 
 	return minRSSI, sum / len(survey.Cells), maxRSSI
-}
-
-// surveyJSON 是落盘格式：cells 展开为 "row,col" 字符串键，
-// 比内部 int 键可读、可手工修补，也方便其他工具消费。
-type surveyJSON struct {
-	SSID      string         `json:"ssid"`
-	BSSID     string         `json:"bssid"`
-	Cols      int            `json:"cols"`
-	Rows      int            `json:"rows"`
-	Cells     map[string]int `json:"cells"`
-	Plan      []string       `json:"plan,omitempty"`
-	StartedAt time.Time      `json:"started_at"`
-	SavedAt   time.Time      `json:"saved_at"`
 }
 
 // Save 把勘测写入 JSON 文件。
