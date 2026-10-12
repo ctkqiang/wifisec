@@ -33,31 +33,6 @@ const helpArtWidth = 9
 // 描述换行缩进，避免描述列被单一长命令（brute / clone up）拉出屏幕。
 const helpSignatureCap = 34
 
-// helpCommand 是一条子命令的签名与一句话说明。
-type helpCommand struct {
-	Signature string
-	Summary   string
-}
-
-// helpGroup 把子命令按功能分组，标题后可附灰色补充说明。
-type helpGroup struct {
-	Title    string
-	Note     string
-	Commands []helpCommand
-}
-
-// helpExample 是示例条目，注释渲染在行尾灰色区。
-type helpExample struct {
-	Command string
-	Comment string
-}
-
-// helpDoc 是文档指引条目。
-type helpDoc struct {
-	Path    string
-	Summary string
-}
-
 // helpColorEnabled 在包初始化时探测一次终端能力，help 是一次性输出，
 // 无需在每次 paintText 里反复 Stat。
 var helpColorEnabled = detectHelpColor()
@@ -99,6 +74,8 @@ var helpGroups = []helpGroup{
 		Commands: []helpCommand{
 			{Signature: "devices [网卡名]", Summary: "发现局域网在线设备（IP/MAC/主机名/网关角色）"},
 			{Signature: "scan_ports <目标> [端口]", Summary: "nmap 风格 TCP 扫描：open/closed/filtered + banner"},
+			{Signature: "agent [--port N] [--token 令牌]", Summary: "被控端：启动横向移动 agent，等待控制端接入"},
+			{Signature: "shell <ip> [命令] [--token 令牌]", Summary: "控制端：shell <ip> bash 交互会话；wifisec <ip> <命令> 一步执行"},
 			{Signature: "get_packet [网卡] [秒] [文件] [--eapol] [--pmkid --bssid xx] [--ssid 名称]", Summary: "连接态抓包导出 pcap；--eapol 实时分析握手，--pmkid 主动会话与抓包共存"},
 			{Signature: "extract <capture.pcap> [--hashcat out.22000] [--pmkid out.16800] [--bssid xx] [--ssid 名称] [--json]", Summary: "离线分析 pcap：握手数/PMKID/帧合法性，择优导出 hash 行"},
 		},
@@ -121,6 +98,9 @@ var helpExamples = []helpExample{
 	{Command: "wifisec jam all", Comment: "全频段：所有可见 AP 逐个打击"},
 	{Command: "wifisec brute 'MyWiFi' with-pass: pass.txt", Comment: "字典爆破，命中即停"},
 	{Command: "wifisec clone 'MyWiFi':'same-password' up", Comment: "克隆热点并 kick 真实 AP"},
+	{Command: "wifisec agent --token lab2026", Comment: "被控端：等待横向移动控制端接入"},
+	{Command: "wifisec 192.168.1.123 bash --token lab2026", Comment: "横向移动：IP 开头自动路由进交互 shell"},
+	{Command: "wifisec 192.168.1.123 whoami", Comment: "单命令一步执行，远端退出码映射本地"},
 	{Command: "wifisec devices", Comment: "局域网在线设备"},
 	{Command: "wifisec scan_ports 192.168.1.1 22,80,8000-8100", Comment: "自定义端口规格"},
 	{Command: "wifisec get_packet en0 30 capture.pcap", Comment: "抓 30 秒并落盘"},
@@ -139,7 +119,33 @@ var helpDocs = []helpDoc{
 	{Path: "docs/feature/wireless_ids.md", Summary: "无线 IDS 检测器与阈值判读"},
 	{Path: "docs/feature/wifi_pmkid.md", Summary: "PMKID 主动获取与 pcap 离线提取"},
 	{Path: "docs/feature/wifi_jam.md", Summary: "jam 全频段干扰器：双帧 + all 模式"},
+	{Path: "docs/feature/lateral_movement.md", Summary: "横向移动：agent/shell 与授权边界"},
 	{Path: "https://www.ctkqiang.xin/wifisec", Summary: "在线文档站"},
+}
+
+// helpCommand 是一条子命令的签名与一句话说明。
+type helpCommand struct {
+	Signature string
+	Summary   string
+}
+
+// helpGroup 把子命令按功能分组，标题后可附灰色补充说明。
+type helpGroup struct {
+	Title    string
+	Note     string
+	Commands []helpCommand
+}
+
+// helpExample 是示例条目，注释渲染在行尾灰色区。
+type helpExample struct {
+	Command string
+	Comment string
+}
+
+// helpDoc 是文档指引条目。
+type helpDoc struct {
+	Path    string
+	Summary string
 }
 
 // HelpUsage 输出用法总览。help 文本按惯例绕过 slog 直接写 stdout，
