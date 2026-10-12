@@ -27,6 +27,7 @@ var (
 		"extract":    functions.RunExtract,
 		"ids":        functions.RunWirelessIDS,
 		"heatmap":    functions.RunHeatmap,
+		"jam":        functions.RunJammer,
 		"help":       functions.HelpUsage,
 	}
 )

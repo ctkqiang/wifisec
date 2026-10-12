@@ -4,7 +4,7 @@
 
 WifiSec（无线安全审计工具）是哪吒网络安全出品的开源 WiFi 渗透测试与口令强度评估框架，采用 Hexagonal Architecture（六边形架构），Go 1.26+ 纯血实现，核心链路零 CGO。它把传统无线审计里最难缠的三件事——**root 权限、monitor 模式驱动、平台差异**——全部下沉到一块约十元的 ESP 开发板上：deauth 帧注入与关联尝试跑在板载射频，宿主机只经 USB 串口收发协议帧。
 
-关键词：WiFi 安全、无线渗透测试、deauth 攻击、802.11 帧注入、WPA2 密码爆破、WiFi brute force、ESP8266、ESP32、无线安全审计、wireless security audit、WiFi pentesting tool、deauthentication、WPA handshake、PMKID、PMKID attack、hashcat 22000、hashcat 16800、RSN IE、EAPOL-Key、M1-M4 握手配对、WPA handshake 离线爆破、免客户端破解、clientless attack、802.11w PMF、Termux WiFi 工具、免 root WiFi 破解、红队工具、red team、网络安全、渗透测试框架、Evil Twin、rogue AP、WiFi hotspot clone、hostapd、钓鱼热点检测、局域网设备发现、ARP 邻居表、TCP 端口扫描、nmap connect scan、banner grabbing、抓包、packet capture、pcap、Wireshark、AF_PACKET、BPF、Npcap、pcap 离线分析、无线入侵检测、wireless IDS、WIDS、rogue AP detection、KARMA attack、beacon flood、deauth flood detection、evil twin detection、加密降级检测、WEP crack detection、open WiFi audit、企业无线安全、wireless monitoring、WPA3、802.11w PMF、WiFi 热力图、wifi heatmap、信号热力图、site survey、站点勘测、RSSI 可视化、signal strength map、IDW 插值、inverse distance weighting、AP 定位、覆盖死角、dead zone、TUI、terminal UI、平面图勘测。
+关键词：WiFi 安全、无线渗透测试、deauth 攻击、802.11 帧注入、WiFi 干扰、jammer、disassociation、disassoc、全频段干扰、WPA2 密码爆破、WiFi brute force、ESP8266、ESP32、无线安全审计、wireless security audit、WiFi pentesting tool、deauthentication、WPA handshake、PMKID、PMKID attack、hashcat 22000、hashcat 16800、RSN IE、EAPOL-Key、M1-M4 握手配对、WPA handshake 离线爆破、免客户端破解、clientless attack、802.11w PMF、Termux WiFi 工具、免 root WiFi 破解、红队工具、red team、网络安全、渗透测试框架、Evil Twin、rogue AP、WiFi hotspot clone、hostapd、钓鱼热点检测、局域网设备发现、ARP 邻居表、TCP 端口扫描、nmap connect scan、banner grabbing、抓包、packet capture、pcap、Wireshark、AF_PACKET、BPF、Npcap、pcap 离线分析、无线入侵检测、wireless IDS、WIDS、rogue AP detection、KARMA attack、beacon flood、deauth flood detection、evil twin detection、加密降级检测、WEP crack detection、open WiFi audit、企业无线安全、wireless monitoring、WPA3、802.11w PMF、WiFi 热力图、wifi heatmap、信号热力图、site survey、站点勘测、RSSI 可视化、signal strength map、IDW 插值、inverse distance weighting、AP 定位、覆盖死角、dead zone、TUI、terminal UI、平面图勘测。
 
 ## 为什么选择 WifiSec
 
@@ -20,6 +20,7 @@ WifiSec（无线安全审计工具）是哪吒网络安全出品的开源 WiFi �
 - `wifisec list`：无线接口枚举与周边网络扫描（macOS CoreWLAN / Linux iw / Windows netsh），同名 SSID 多 AP 全部列出
 - `wifisec serial`：USB 串口设备发现，VID:PID 芯片对照（CH340 / CP2102 / FT232 / CH9102），占用进程点名
 - `wifisec deauth <ssid|bssid> [串口]`：对目标持续发送 802.11 deauthentication 帧，同名多 AP 轮流切信道全命中，Ctrl-C 停止并输出统计
+- `wifisec jam <ssid|all|bssid> [串口]`：deauth + disassoc 双帧全频段干扰，覆盖只过滤 deauth 但不过滤 disassoc 的客户端；`jam all` 扫描全部可见 AP 逐个打击，200ms 间隔，Ctrl-C 停止并输出统计
 - `wifisec brute <ssid|bssid> with-pass: <字典> [串口]`：在线密码字典爆破，ESP 协处理器与本机网卡双路径，命中即停输出凭证块
 - `wifisec clone <ssid>:<密码> up [nokick] [串口]`：热点克隆（Evil Twin），同名同密码 SoftAP + 默认 200ms 节奏 kick 驱赶真实 AP 客户端，设备接入/离开实时打印；ESP 路径 AP+STA 双模，无设备回落 Linux hostapd（需 root，kick 需第二块网卡）
 - `wifisec clone down [串口]`：停止固件上的克隆热点，恢复 STA 模式
@@ -58,6 +59,7 @@ go install github.com/ctkqiang/wifisec/cmd/wifisec@latest
 - 在线文档站: https://www.ctkqiang.xin/wifisec/
 - 下载页（GitHub Releases）: https://github.com/ctkqiang/wifisec/releases
 - deauth 帧注入详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_deauth.md
+- jam 全频段干扰详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_jam.md
 - brute 密码爆破详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_brute_force.md
 - clone 热点克隆详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/wifi_clone.md
 - 局域网分析三件套（devices / scan_ports / get_packet）详解: https://github.com/ctkqiang/wifisec/blob/main/docs/feature/lan_analysis.md

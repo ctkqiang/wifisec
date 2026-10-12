@@ -69,6 +69,7 @@
           <a href="#cmd-list">list · 无线扫描</a>
           <a href="#cmd-serial">serial · 串口发现</a>
           <a href="#cmd-deauth">deauth · 帧注入</a>
+          <a href="#cmd-jam">jam · 全频段干扰</a>
           <a href="#cmd-brute">brute · 密码爆破</a>
           <a href="#cmd-clone">clone · 热点克隆</a>
           <a href="#cmd-devices">devices · 设备发现</a>
@@ -256,6 +257,19 @@ wifisec brute <span class="str">'MyWiFi'</span> with-pass: pass.txt <span class=
           <div>deauth 一次只打一个 BSSID × 一个频段：目标是 5GHz BSSID 而固件为 2.4GHz 芯片时，程序直接拒绝并说明原因。同名 SSID 的多个 AP 会轮流切信道全部命中。</div>
         </div>
         <p>完整说明（注入循环、信号对账、跨平台路径）见 <a href="feature/wifi_deauth.md">wifi_deauth.md</a>。</p>
+      </section>
+
+      <section id="cmd-jam">
+        <h2>jam · 全频段干扰<a class="anchor" href="#cmd-jam">#</a></h2>
+        <p>对目标 AP 同时发送 deauth + disassoc 双帧，覆盖只过滤 deauth 但不过滤 disassoc 的客户端实现；<code>jam all</code> 扫描全部可见 AP 逐个打击，200ms 间隔，Ctrl-C 停止并输出统计。</p>
+        <pre><code class="lang-bash">wifisec jam <span class="str">'MyWiFi'</span>                    <span class="cmt"># 按 SSID，双帧干扰</span>
+wifisec jam 01:23:45:67:89:ab         <span class="cmt"># 按 BSSID 精确锁定</span>
+wifisec jam all                       <span class="cmt"># 全频段：所有可见 AP 逐个打击</span></code></pre>
+        <div class="alert warning">
+          <span class="alert-icon">⚠</span>
+          <div>jam 每轮对每个目标发两帧（deauth + disassoc），与 deauth 的单帧相比攻击面更宽；<code>jam all</code> 不按 SSID/BSSID 过滤，扫描到的所有 AP 全部命中。macOS 无公开帧注入 API，需使用 ESP 协处理器或切换 Linux/Windows。</div>
+        </div>
+        <p>完整说明（双帧构造、全频段模式、跨平台路径）见 <a href="feature/wifi_jam.md">wifi_jam.md</a>。</p>
       </section>
 
       <section id="cmd-brute">

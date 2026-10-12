@@ -103,14 +103,14 @@ WifiSec 是 Go 编写的无线安全测试工具，采用 Hexagonal Architecture
 
 ```mermaid
 flowchart TB
-    CLI["cmd/wifisec/main.go<br/>命令路由: list / serial / deauth / brute / clone / devices / scan_ports / get_packet / pmkid / extract / ids / help"] --> APP["internal/functions<br/>应用编排: deauther · brute · clone · devices · portscan · sniff · pmkid · extract · ids · lists · serial"]
+    CLI["cmd/wifisec/main.go<br/>命令路由: list / serial / deauth / jam / brute / clone / devices / scan_ports / get_packet / pmkid / extract / ids / help"] --> APP["internal/functions<br/>应用编排: deauther · jammer · brute · clone · devices · portscan · sniff · pmkid · extract · ids · lists · serial"]
     APP -->|"端口: frameWriter<br/>channelSetter"| ESP["internal/platform/esp<br/>串口帧协议 · 复位时序 · 噪声重同步"]
     APP -->|"端口: 无线扫描"| DAR["darwin · CoreWLAN"]
     APP --> LIN["linux · iw + AF_PACKET<br/>termux · Android API"]
     APP --> WIN["windows · Npcap + netsh"]
     APP --> LAN["lan · 邻居表/网关<br/>capture · AF_PACKET/BPF/Npcap"]
     ESP -->|"115200 8N1"| HW["ESP8266 / ESP32<br/>core/esp/esp.ino"]
-    IEEE["internal/ieee80211<br/>deauth 帧纯字节编解码"] -.-> APP
+    IEEE["internal/ieee80211<br/>deauth / disassoc 帧纯字节编解码"] -.-> APP
     PCAP["internal/pcapfile + ethernet<br/>pcap 写入器 · 帧摘要"] -.-> LAN
     WIDS["internal/wids<br/>无线 IDS 纯检测引擎<br/>快照差分 + 帧滑窗计数"] -.-> APP
     PMK["internal/rsnie · eapol · pmkid<br/>RSN IE 状态机 · EAPOL M1-M4 配对<br/>PMKID 主动获取 · hashcat 22000/16800"] -.-> APP
@@ -127,6 +127,7 @@ flowchart TB
 wifisec list                              # 列出无线接口与周边网络
 wifisec serial                            # 列出 USB 串口设备（协处理器入口排查）
 wifisec deauth <ssid|bssid> [串口]        # 对目标持续发送 deauth 帧，Ctrl-C 停止
+wifisec jam <ssid|all|bssid> [串口]        # deauth+disassoc 双帧全频段干扰，jam all 打所有可见 AP；未插板回落本机网卡
 wifisec brute <ssid|bssid> with-pass: <字典> [串口]   # 在线密码字典爆破，命中即停
 wifisec clone <ssid>:<密码> up [nokick] [串口]        # 克隆同名热点（Evil Twin），Ctrl-C 结束
 wifisec clone down [串口]                 # 停止固件上的克隆热点
@@ -146,6 +147,7 @@ wifisec help                              # 用法总览
 | `list`    | 无线接口枚举与周边网络扫描 | [wifi_list.md](docs/feature/wifi_list.md)                |
 | `serial`  | 串口设备发现与 VID:PID 判读 | [wifi_serial.md](docs/feature/wifi_serial.md)            |
 | `deauth`  | 802.11 deauthentication 帧注入 | [wifi_deauth.md](docs/feature/wifi_deauth.md)        |
+| `jam`     | deauth + disassoc 双帧全频段干扰，`jam all` 扫描全部可见 AP 逐个打击；未插板自动回落本机网卡 | [wifi_jam.md](docs/feature/wifi_jam.md)               |
 | `brute`   | 在线密码字典爆破，命中即停并输出 SSID/BSSID/密码凭证块（ESP 协处理器；无设备时回落本机网卡） | [wifi_brute_force.md](docs/feature/wifi_brute_force.md) |
 | `clone`   | 热点克隆（Evil Twin）：同名同密码 SoftAP + 可选 kick 驱赶真实 AP 客户端（ESP 协处理器；无设备时回落 Linux hostapd） | [wifi_clone.md](docs/feature/wifi_clone.md) |
 | `devices` | 局域网设备发现：TCP 探针刷 ARP + 系统邻居表交叉，输出 IP/MAC/主机名/角色，四平台免 root | [lan_analysis.md](docs/feature/lan_analysis.md) |
@@ -195,13 +197,13 @@ wifisec help                              # 用法总览
 
 ```
 wifisec/
-├── cmd/wifisec/main.go                  # 入口：命令注册与路由（list/serial/deauth/brute/clone/devices/scan_ports/get_packet/pmkid/extract/ids/help）
+├── cmd/wifisec/main.go                  # 入口：命令注册与路由（list/serial/deauth/jam/brute/clone/devices/scan_ports/get_packet/pmkid/extract/ids/help）
 ├── core/esp/esp.ino                     # 协处理器固件（ESP8266/ESP32 全系，编译期条件分支）
 ├── internal/
 │   ├── constants/                       # 开发者元数据等常量
-│   ├── functions/                       # 应用编排：deauther · connect(brute) · clone · devices · portscan · sniff · pmkid · extract · ids · lists · serial · help
+│   ├── functions/                       # 应用编排：deauther · jammer · connect(brute) · clone · devices · portscan · sniff · pmkid · extract · ids · lists · serial · help
 │   ├── ethernet/frame.go                # 局域网抓包帧摘要（ARP/IPv4/IPv6/TCP/UDP/ICMP/EAPOL/LLDP）
-│   ├── ieee80211/frame.go               # deauth 帧纯字节编解码（与介质解耦，可独立单测）
+│   ├── ieee80211/frame.go               # deauth / disassoc 帧纯字节编解码（与介质解耦，可独立单测）
 │   ├── rsnie/parse.go                   # RSN IE(0x30) 状态机解析：密码套件/AKM/RSN 能力/PMKID 列表，malformed 即弃
 │   ├── eapol/                           # EAPOL-Key 帧解析与 M1-M4 配对，归一 Candidate → hashcat 22000/16800
 │   ├── pmkid/client.go                  # PMKID 主动获取状态机（随机 STA MAC · 重试退避 · 失败分类）
@@ -226,7 +228,7 @@ wifisec/
 │   ├── logo.svg                         # 项目 Logo
 │   ├── src/style/ · src/scripts/        # 文档站样式（SCSS 源 + 编译产物）与交互脚本
 │   ├── diagram/                         # PlantUML：执行流程 + 串口协议时序
-│   └── feature/                         # wifi_list / wifi_serial / wifi_deauth / wifi_brute_force / wifi_clone / lan_analysis / wireless_ids / wifi_heatmap / wifi_pmkid 详细文档
+│   └── feature/                         # wifi_list / wifi_serial / wifi_deauth / wifi_jam / wifi_brute_force / wifi_clone / lan_analysis / wireless_ids / wifi_heatmap / wifi_pmkid 详细文档
 ├── Makefile                             # build / list / test / 等构建编排
 └── .githooks/                           # Conventional Commits 提交信息校验钩子
 ```

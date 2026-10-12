@@ -72,6 +72,7 @@ var helpGroups = []helpGroup{
 			{Signature: "list", Summary: "枚举本机无线接口与周边网络"},
 			{Signature: "serial", Summary: "列出 USB 串口设备与 VID:PID（协处理器入口）"},
 			{Signature: "deauth <ssid|bssid> [串口]", Summary: "持续发送 deauth 帧，Ctrl-C 停止并输出统计"},
+			{Signature: "jam <ssid|all|bssid> [串口]", Summary: "deauth+disassoc 双帧全频段干扰；jam all 打所有可见 AP"},
 			{Signature: "brute <ssid|bssid> with-pass: <字典> [串口]", Summary: "在线密码字典爆破，命中即停"},
 			{Signature: "clone <ssid>:<密码> up [nokick] [串口]", Summary: "克隆同名热点（Evil Twin），Ctrl-C 结束"},
 			{Signature: "clone down [串口]", Summary: "停止固件上的克隆热点"},
@@ -116,6 +117,8 @@ var helpExamples = []helpExample{
 	{Command: "wifisec list", Comment: "周边网络全景"},
 	{Command: "wifisec deauth 'MyWiFi'", Comment: "按 SSID，同名多 AP 全部命中"},
 	{Command: "wifisec deauth 01:23:45:67:89:ab", Comment: "按 BSSID 精确锁定"},
+	{Command: "wifisec jam 'MyWiFi'", Comment: "双帧干扰（deauth+disassoc）"},
+	{Command: "wifisec jam all", Comment: "全频段：所有可见 AP 逐个打击"},
 	{Command: "wifisec brute 'MyWiFi' with-pass: pass.txt", Comment: "字典爆破，命中即停"},
 	{Command: "wifisec clone 'MyWiFi':'same-password' up", Comment: "克隆热点并 kick 真实 AP"},
 	{Command: "wifisec devices", Comment: "局域网在线设备"},
@@ -135,6 +138,7 @@ var helpDocs = []helpDoc{
 	{Path: "docs/feature/lan_analysis.md", Summary: "局域网三件套原理与授权边界"},
 	{Path: "docs/feature/wireless_ids.md", Summary: "无线 IDS 检测器与阈值判读"},
 	{Path: "docs/feature/wifi_pmkid.md", Summary: "PMKID 主动获取与 pcap 离线提取"},
+	{Path: "docs/feature/wifi_jam.md", Summary: "jam 全频段干扰器：双帧 + all 模式"},
 	{Path: "https://www.ctkqiang.xin/wifisec", Summary: "在线文档站"},
 }
 

