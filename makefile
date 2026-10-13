@@ -42,7 +42,8 @@ compile:
 
 clean:
 	@echo "正在清理编译产物..."
-	rm -rf $(BUILD_PATH)/$(APP_NAME) $(BUILD_PATH)/$(APP_NAME).app $(BUILD_PATH)/$(APP_NAME).s
+	rm -rf $(APP_NAME) $(BUILD_PATH)/$(APP_NAME) $(BUILD_PATH)/$(APP_NAME).app $(BUILD_PATH)/$(APP_NAME).s \
+		$(BUILD_PATH)/$(APP_NAME)-linux-amd64 $(BUILD_PATH)/$(APP_NAME)-windows-amd64.exe $(BUILD_PATH)/$(APP_NAME)-darwin-arm64
 
 tidy:
 	go mod tidy
@@ -65,6 +66,7 @@ help:
 
 cross-build:
 	@echo "正在为多平台交叉编译..."
+	@mkdir -p $(BUILD_PATH)
 	GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(BUILD_PATH)/$(APP_NAME)-linux-amd64 $(MAIN_PATH)
 	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(BUILD_PATH)/$(APP_NAME)-windows-amd64.exe $(MAIN_PATH)
 	GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o $(BUILD_PATH)/$(APP_NAME)-darwin-arm64 $(MAIN_PATH)
