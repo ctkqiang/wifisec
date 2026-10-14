@@ -31,14 +31,17 @@ const maxSpoofTargets = 32
 type SniffCommandOptions struct {
 	Interface string   // 网卡名；空表示自动选择（优先无线网卡）
 	Spoof     bool     // --spoof：ARP 欺骗 MITM
+	Recon     bool     // --recon：会话启动时主动 ARP 扫描预填充主机表
 	Targets   []string // --targets：逗号分隔的目标 IPv4；空表示毒化全部在线主机
 }
 
 // RunSniff 是 sniff 命令入口：被动嗅探当前连接网络的流量并实时标注
-// DNS/HTTP/SNI，--spoof 时叠加 ARP 欺骗把目标流量引到本机。
+// DNS/HTTP/SNI，--spoof 时叠加 ARP 欺骗把目标流量引到本机，
+// --recon 时会话启动前主动 ARP 扫描预填充主机表。
 // 用法：
 //
 //	wifisec sniff [--iface 网卡名]
+//	wifisec sniff --recon [--iface 网卡名]
 //	wifisec sniff --spoof [--targets ip1,ip2] [--iface 网卡名]
 func RunSniff(arguments []string) error {
 	options, err := ParseSniffCommandArgs(arguments)
@@ -82,6 +85,9 @@ func RunSniff(arguments []string) error {
 		gatewayIP  net.IP
 		gatewayMAC net.HardwareAddr
 		targets    []mitm.Target
+
+		tracker *ethernet.HostTracker
+		filter  *EventFilter
 	)
 
 	// 统一清理：先停毒化（恢复帧还要走端口），再关端口，最后还原
@@ -102,17 +108,21 @@ func RunSniff(arguments []string) error {
 			}
 		}
 
-		utilities.Info("嗅探结束：%d 帧 · %s · 时长 %s\n协议分布：%s",
-			stats.packets, humanizeBytes(stats.bytes),
-			time.Since(stats.started).Round(10*time.Millisecond),
-			formatProtocolDistribution(stats.protocol, 5))
+		printSniffHostSummary(tracker, stats)
 	}()
 
-	if options.Spoof {
-		if gatewayIP, err = lan.DefaultGateway(); err != nil {
+	// 总是获取网关 IP——被动模式也需要标注网关角色，让事件流中
+	// 网关发出的 ARP 帧显示为 {网关} 而非裸 IP。读不到不致命。
+	if gatewayIP, err = lan.DefaultGateway(); err != nil {
+		if options.Spoof {
 			return fmt.Errorf("读取默认网关失败，ARP 欺骗需要网关参与：%w", err)
 		}
 
+		utilities.Warn("读取默认网关失败，主机表中网关角色将缺失：%v", err)
+		gatewayIP = nil
+	}
+
+	if options.Spoof {
 		if targets, gatewayMAC, err = resolveSpoofMaterials(options.Targets, ipnet, selfIP, gatewayIP); err != nil {
 			return err
 		}
@@ -144,11 +154,60 @@ func RunSniff(arguments []string) error {
 
 	printSniffBanner(iface.Name, options, targets, gatewayIP)
 
+	// 主机跟踪器在 banner 之后、发包之前就绪：recon 用它预填充，
+	// 被动模式靠帧流逐帧 Observe 累积。filter 绑定 tracker 后喂给读循环。
+	tracker = ethernet.NewHostTracker(selfIP, gatewayIP)
+	filter = NewEventFilter(tracker, selfIP, gatewayIP)
+
+	// 会话开始时标注本机与网关身份：本机出站帧在 spoof 模式下被过滤，
+	// 被动模式下第一条 [host] 事件可能晚到；预填充让角色标注在会话
+	// 开始时即出现，用户一眼知道 {本机} 和 {网关} 是谁。
+	// 用 formatSniffEventLine 而非 utilities.Info，保证预填充行与
+	// 后续事件流的列对齐完全一致。
+	if selfIP != nil && len(iface.HardwareAddr) == 6 {
+		host, _ := tracker.Observe(selfIP, iface.HardwareAddr)
+		fmt.Println(formatSniffEventLine(filter.makeHostEvent(host)))
+	}
+
+	if gatewayIP != nil {
+		// 网关 MAC 从 ARP 邻居表获取；被动模式下没有主动探测，
+		// 取不到不致命——后续 ARP 帧到来时会自然补上。
+		if neighbors, neighborErr := lan.Neighbors(); neighborErr == nil {
+			for _, n := range neighbors {
+				if n.IP.Equal(gatewayIP) && len(n.HWAddr) == 6 {
+					host, _ := tracker.Observe(gatewayIP, n.HWAddr)
+					fmt.Println(formatSniffEventLine(filter.makeHostEvent(host)))
+					break
+				}
+			}
+		}
+	}
+
+	// --recon：主动 ARP 扫描把网段内在线主机的 (IP, MAC, 厂商) 灌入
+	// 主机表当冷启动底图，避免"明明有设备却报新发现"的噪声。
+	if options.Recon {
+		gatewayStr := ""
+		if gatewayIP != nil {
+			gatewayStr = gatewayIP.String()
+		}
+
+		candidates := planDiscoveryTargets(ipnet, selfIP, gatewayStr)
+		utilities.Info("recon：并发探测 %d 个地址以刷新 ARP 表…", len(candidates))
+		probeHosts(candidates)
+
+		if neighbors, neighborErr := lan.Neighbors(); neighborErr != nil {
+			utilities.Warn("读取 ARP 邻居表失败，recon 预填充跳过：%v", neighborErr)
+		} else {
+			tracker.Preload(neighbors)
+			utilities.Info("recon 完成：主机表已预填充 %d 台", len(tracker.Snapshot()))
+		}
+	}
+
 	if spoofer != nil {
 		spoofer.Start()
 	}
 
-	sniffReadLoop(ctx, source, spoofer, iface.HardwareAddr, &stats)
+	sniffReadLoop(ctx, source, spoofer, iface.HardwareAddr, &stats, filter)
 
 	return nil
 }
@@ -168,6 +227,8 @@ func ParseSniffCommandArgs(arguments []string) (SniffCommandOptions, error) {
 		switch {
 		case token == "--spoof":
 			options.Spoof = true
+		case token == "--recon":
+			options.Recon = true
 		case token == "--targets":
 			if index+1 >= len(arguments) {
 				return options, errors.New("--targets 需要逗号分隔的 IPv4 列表，例如 --targets 192.168.1.66,192.168.1.107")
@@ -187,7 +248,7 @@ func ParseSniffCommandArgs(arguments []string) (SniffCommandOptions, error) {
 			index++
 			options.Interface = strings.TrimSpace(arguments[index])
 		case strings.HasPrefix(token, "-"):
-			return options, fmt.Errorf("无法识别的参数 %q（支持 --spoof/--targets/--iface）", token)
+			return options, fmt.Errorf("无法识别的参数 %q（支持 --spoof/--recon/--targets/--iface）", token)
 		default:
 			if options.Interface != "" {
 				return options, fmt.Errorf("无法识别的多余参数 %q（网卡名已指定为 %s）", token, options.Interface)
@@ -311,15 +372,16 @@ func resolveSpoofMaterials(explicit []string, ipnet *net.IPNet, selfIP, gatewayI
 // sniffReadLoop 是主读取循环：仅在空闲超时点检查取消信号，收到帧时
 // 过滤本机自发帧、更新统计并限速打印。毒化会话把每帧喂给 Spoofer，
 // 「目标 who-has 网关」时即时应答，不等下一个秒级毒化周期。
-func sniffReadLoop(ctx context.Context, source capture.Source, spoofer *mitm.Spoofer, selfMAC net.HardwareAddr, stats *captureStats) {
+// filter 把帧收敛成 bettercap 风格的语义事件（DNS/HTTP/SNI/ARP/host/cred），
+// 取代 Wireshark 风格的逐帧列表——get_packet 仍走 printSniffLine。
+func sniffReadLoop(ctx context.Context, source capture.Source, spoofer *mitm.Spoofer, selfMAC net.HardwareAddr, stats *captureStats, filter *EventFilter) {
 	ticker := time.NewTicker(sniffStatInterval)
 	defer ticker.Stop()
 
 	var (
-		budget     = sniffLinesPerSecond
+		budget     = sniffEventsPerSecond
 		refillAt   = time.Now().Add(time.Second)
 		suppressed int
-		sequence   int
 	)
 
 	for {
@@ -345,13 +407,15 @@ func sniffReadLoop(ctx context.Context, source capture.Source, spoofer *mitm.Spo
 			return
 		}
 
-		// 读写句柄独立，但内核回环会把发出的毒化/恢复帧送回读句柄；
-		// 按源 MAC 过滤，ARP 事件行全部来自网络真实活动。
-		if len(frame) >= 12 && bytes.Equal(frame[6:12], selfMAC) {
+		// spoof 模式下过滤本机帧避免毒化帧回环；被动模式下保留本机流量，
+		// 让用户看到本机发出的 DNS/HTTP/SNI 并标注 {本机}。
+		if spoofer != nil && len(frame) >= 12 && bytes.Equal(frame[6:12], selfMAC) {
 			continue
 		}
 
-		summary := ethernet.SummarizeWithL7(frame)
+		// Summarize 取基础摘要（二层 MAC + 协议 + Info），L7 解析下沉到 Filter
+		// 内部调用 ParseL7，避免对同一帧跑两次应用层解析。
+		summary := ethernet.Summarize(frame)
 		stats.packets++
 		stats.bytes += len(frame)
 		stats.protocol[summary.Proto]++
@@ -360,8 +424,9 @@ func sniffReadLoop(ctx context.Context, source capture.Source, spoofer *mitm.Spo
 			spoofer.Observe(frame)
 		}
 
-		sequence++
-		budget, suppressed = printSniffLine(sequence, summary, len(frame), budget, &refillAt, suppressed)
+		for _, event := range filter.Filter(frame, summary) {
+			budget, suppressed = printSniffEvent(event, budget, &refillAt, suppressed)
+		}
 	}
 }
 
@@ -389,6 +454,10 @@ func printSniffBanner(ifaceName string, options SniffCommandOptions, targets []m
 			"WPA2 下被动模式只能看到本机流量与广播帧（ARP/DHCP/mDNS）",
 			"要观测他人单播流量请加 --spoof 启用 ARP 欺骗（仅限已授权网络）",
 		)
+	}
+
+	if options.Recon {
+		lines = append(lines, "--recon：会话启动时主动 ARP 扫描预填充主机表")
 	}
 
 	utilities.Info("%s", strings.Join(lines, "\n"))

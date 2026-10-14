@@ -1,6 +1,6 @@
 // l7.go 在帧摘要之上追加应用层语义：DNS 查询域名、HTTP 请求行、
-// TLS SNI。定位是「控制台瞄一眼」的尽力而为解析，不做 TCP 流重组、
-// 不解析 DNS 应答与跨段分片；任何一步长度越界都直接返回空串，
+// TLS SNI、HTTP 明文凭据。定位是「控制台瞄一眼」的尽力而为解析，
+// 不做 TCP 流重组、不解析 DNS 应答与跨段分片；任何一步长度越界都直接返回空，
 // 嗅探循环不能因为一个畸形包停下来。
 package ethernet
 
@@ -10,12 +10,12 @@ import (
 	"strings"
 )
 
-// FrameSummary 增加 L7 字段：命中应用层解析时填 "dns"/"http"/"sni"，
-// 未命中为空。字段对 get_packet 的旧输出无影响（它只打印 Info）。
+// 应用层命中标签。L7CRED 单独区分带凭据的 HTTP 流量，便于上层告警分流。
 const (
 	L7DNS  = "dns"
 	L7HTTP = "http"
 	L7SNI  = "sni"
+	L7CRED = "cred"
 )
 
 // 常用明文/明文可观测端口：仅对「客户端→服务器」方向做请求解析。
@@ -29,29 +29,81 @@ const (
 	maxHTTPPeek      = 4096
 )
 
+// dnsQTypeNames 覆盖家用网络 DNS 监控里出现频率最高的查询类型；
+// 未列出的码退回空串，调用方按"未知"显示。
+var dnsQTypeNames = map[uint16]string{
+	1:  "A",
+	2:  "NS",
+	5:  "CNAME",
+	12: "PTR",
+	15: "MX",
+	16: "TXT",
+	28: "AAAA",
+	33: "SRV",
+	65: "HTTPS",
+}
+
+// L7Event 把 parseL7 的输出结构化：DNS 的域名/类型、HTTP 的请求行、
+// TLS 的 SNI、以及 HTTP 体里漏出的凭据。字段共用一个结构便于上层
+// 在控制台摘要、主机表、告警等不同视角下复用同一份解析结果。
+type L7Event struct {
+	Kind       string
+	DNSName    string
+	DNSQType   string
+	HTTPMethod string
+	HTTPPath   string
+	HTTPHost   string
+	SNI        string
+	Credential Credential
+}
+
 // SummarizeWithL7 先取基础摘要，再按端口尝试应用层解析；
 // 命中时把结果追加到 Info 并回填 L7 标签。
 func SummarizeWithL7(frame []byte) FrameSummary {
 	summary := Summarize(frame)
 
-	detail, kind := parseL7(frame)
-	if kind == "" {
+	event, ok := ParseL7(frame)
+	if !ok {
 		return summary
 	}
 
 	if summary.Info != "" {
 		summary.Info += " · "
 	}
-	summary.Info += detail
-	summary.L7 = kind
+	summary.Info += formatL7Event(event)
+	summary.L7 = event.Kind
 
 	return summary
 }
 
-// parseL7 复走一次网络层/传输层头拿到端口与载荷，
-// 再分派到对应协议解析器。与 fillIPv4 的偏移逻辑保持同构，
-// 但不共用私有函数：展示层语义变化不应牵动帧解析主路径。
-func parseL7(frame []byte) (string, string) {
+// formatL7Event 把 L7Event 渲染回老版 parseL7 输出的字符串形态，
+// 既有调用方与测试用例只关心 Info 里是否含域名或 Host 头，无需改写。
+// L7CRED 不把用户名/口令拼回 Info，避免凭据被随手打到终端或日志里。
+func formatL7Event(event L7Event) string {
+	switch event.Kind {
+	case L7DNS:
+		return "dns 查询 " + event.DNSName
+	case L7HTTP, L7CRED:
+		result := event.HTTPMethod + " " + event.HTTPPath
+		if event.HTTPHost != "" {
+			result += " · Host: " + event.HTTPHost
+		}
+		if event.Kind == L7CRED {
+			result += " · cred " + event.Credential.Type
+		}
+
+		return result
+	case L7SNI:
+		return "SNI " + event.SNI
+	}
+
+	return ""
+}
+
+// ParseL7 复走一次网络层/传输层头拿到端口与载荷，再分派到对应协议解析器。
+// 与 fillIPv4 的偏移逻辑保持同构，但不共用私有函数：展示层语义变化不应牵动帧解析主路径。
+// 导出供 functions 包的 EventFilter 取结构化字段（域名/方法/SNI/凭据），不再反向解析 Info 字符串。
+func ParseL7(frame []byte) (L7Event, bool) {
 	offset, etherType := decodeVLAN(frame)
 
 	var (
@@ -63,17 +115,17 @@ func parseL7(frame []byte) (string, string) {
 	switch etherType {
 	case etherTypeIPv4:
 		if len(frame) < offset+20 {
-			return "", ""
+			return L7Event{}, false
 		}
 
 		headerLen := int(frame[offset]&0x0f) * 4
 		if headerLen < 20 || len(frame) < offset+headerLen {
-			return "", ""
+			return L7Event{}, false
 		}
 
 		payload = frame[offset+headerLen:]
 		if len(payload) < 4 {
-			return "", ""
+			return L7Event{}, false
 		}
 
 		switch frame[offset+9] {
@@ -84,16 +136,16 @@ func parseL7(frame []byte) (string, string) {
 			dstPort = int(binary.BigEndian.Uint16(payload[2:4]))
 			direction = "udp"
 		default:
-			return "", ""
+			return L7Event{}, false
 		}
 	case etherTypeIPv6:
 		if len(frame) < offset+40 {
-			return "", ""
+			return L7Event{}, false
 		}
 
 		payload = frame[offset+40:]
 		if len(payload) < 4 {
-			return "", ""
+			return L7Event{}, false
 		}
 
 		switch frame[offset+6] {
@@ -104,59 +156,91 @@ func parseL7(frame []byte) (string, string) {
 			dstPort = int(binary.BigEndian.Uint16(payload[2:4]))
 			direction = "udp"
 		default:
-			return "", ""
+			return L7Event{}, false
 		}
 	default:
-		return "", ""
+		return L7Event{}, false
 	}
 
 	// 传输层头长度：TCP 头可变（取 data offset），UDP 固定 8。
 	switch direction {
 	case "udp":
 		if len(payload) < 8 {
-			return "", ""
+			return L7Event{}, false
 		}
 		payload = payload[8:]
 	case "tcp":
 		if len(payload) < 20 {
-			return "", ""
+			return L7Event{}, false
 		}
 		dataOffset := int(payload[12]>>4) * 4
 		if dataOffset < 20 || len(payload) < dataOffset {
-			return "", ""
+			return L7Event{}, false
 		}
 		payload = payload[dataOffset:]
 	}
 
 	switch {
 	case direction == "udp" && dstPort == dnsPort:
-		if name := ParseDNSQuery(payload); name != "" {
-			return "dns 查询 " + name, L7DNS
+		name, qtype := ParseDNSQuestion(payload)
+		if name == "" {
+			return L7Event{}, false
 		}
+
+		return L7Event{Kind: L7DNS, DNSName: name, DNSQType: qtype}, true
 	case direction == "tcp" && dstPort == httpPort:
-		if request := ParseHTTPRequest(payload); request != "" {
-			return request, L7HTTP
+		// HTTP 请求行没有命中就放弃；命中后再叠一层凭据扫描，
+		// 避免对二进制/畸形流量白白跑 ParseCredential。
+		requestLine := extractHTTPRequestLine(payload)
+		if requestLine == "" {
+			return L7Event{}, false
 		}
+
+		event := L7Event{Kind: L7HTTP, HTTPHost: findHTTPHost(payload)}
+		if space := strings.IndexByte(requestLine, ' '); space > 0 {
+			event.HTTPMethod = requestLine[:space]
+			event.HTTPPath = requestLine[space+1:]
+		} else {
+			event.HTTPPath = requestLine
+		}
+
+		if cred, ok := ParseCredential(payload); ok {
+			event.Credential = cred
+			event.Kind = L7CRED
+		}
+
+		return event, true
 	case direction == "tcp" && dstPort == tlsPort:
-		if name := ParseTLSSNI(payload); name != "" {
-			return "SNI " + name, L7SNI
+		name := ParseTLSSNI(payload)
+		if name == "" {
+			return L7Event{}, false
 		}
+
+		return L7Event{Kind: L7SNI, SNI: name}, true
 	}
 
-	return "", ""
+	return L7Event{}, false
 }
 
-// ParseDNSQuery 从 UDP DNS 查询载荷提取第一个 Question 的域名。
-// 只认 QR=0 的标准查询；应答与畸形报文一律返回空。
+// ParseDNSQuery 仅返回域名，是 ParseDNSQuestion 的薄封装；
+// 旧调用方仍可拿到单值返回，新调用方建议直接用 ParseDNSQuestion 拿 qtype。
 func ParseDNSQuery(payload []byte) string {
+	name, _ := ParseDNSQuestion(payload)
+
+	return name
+}
+
+// ParseDNSQuestion 解析标准查询报文的首个 Question，返回 (域名, 类型名)。
+// QR=1（应答）或 question count 为 0 直接返回空，避免把应答误判成查询。
+func ParseDNSQuestion(payload []byte) (string, string) {
 	if len(payload) < 12 {
-		return ""
+		return "", ""
 	}
 
 	flags := binary.BigEndian.Uint16(payload[2:4])
 	questions := binary.BigEndian.Uint16(payload[4:6])
 	if flags&0x8000 != 0 || questions == 0 {
-		return ""
+		return "", ""
 	}
 
 	var (
@@ -168,7 +252,7 @@ func ParseDNSQuery(payload []byte) string {
 	for offset < len(payload) {
 		lookups++
 		if lookups > maxDNSNameLength {
-			return ""
+			return "", ""
 		}
 
 		length := int(payload[offset])
@@ -178,7 +262,7 @@ func ParseDNSQuery(payload []byte) string {
 
 		// 标签长度 0x40/0x80 位是 EDNS/压缩前缀，查询首问不会出现。
 		if length > 63 || offset+1+length > len(payload) {
-			return ""
+			return "", ""
 		}
 
 		if name.Len() > 0 {
@@ -189,27 +273,25 @@ func ParseDNSQuery(payload []byte) string {
 	}
 
 	if name.Len() == 0 {
-		return ""
+		return "", ""
 	}
 
-	return name.String()
+	// qtype 紧跟 0 终止符之后的 2 字节；空间不足视为畸形，只回退域名。
+	if offset+3 > len(payload) {
+		return name.String(), ""
+	}
+
+	qtypeCode := binary.BigEndian.Uint16(payload[offset+1 : offset+3])
+
+	return name.String(), dnsQTypeNames[qtypeCode]
 }
 
 // ParseHTTPRequest 从 TCP 载荷提取 HTTP 请求行与 Host 头。
 // 只认「方法 SP 路径 SP HTTP/」形态的首段，不跨段重组；
 // TLS 流量或二进制协议在首个字节就不再匹配，代价为零。
 func ParseHTTPRequest(payload []byte) string {
-	if len(payload) == 0 || len(payload) > maxHTTPPeek {
-		return ""
-	}
-
-	head := payload
-	if index := bytes.IndexAny(payload, "\r\n"); index >= 0 {
-		head = payload[:index]
-	}
-	requestLine := string(head)
-
-	if !looksLikeRequestLine(requestLine) {
+	requestLine := extractHTTPRequestLine(payload)
+	if requestLine == "" {
 		return ""
 	}
 
@@ -219,6 +301,27 @@ func ParseHTTPRequest(payload []byte) string {
 	}
 
 	return result
+}
+
+// extractHTTPRequestLine 取出首行并校验是否形如「METHOD SP TARGET SP HTTP/x」。
+// 与 ParseHTTPRequest 拆开是因为 parseL7 需要分别拿到请求行与 Host，
+// 不希望把"已拼好的展示串"再切回去。
+func extractHTTPRequestLine(payload []byte) string {
+	if len(payload) == 0 || len(payload) > maxHTTPPeek {
+		return ""
+	}
+
+	head := payload
+	if index := bytes.IndexAny(payload, "\r\n"); index >= 0 {
+		head = payload[:index]
+	}
+
+	requestLine := string(head)
+	if !looksLikeRequestLine(requestLine) {
+		return ""
+	}
+
+	return requestLine
 }
 
 // looksLikeRequestLine 校验首行是否为「METHOD SP TARGET SP HTTP/x」。

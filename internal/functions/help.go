@@ -73,7 +73,7 @@ var helpGroups = []helpGroup{
 		Note:  "本机直连视角；sniff 需 root/管理员",
 		Commands: []helpCommand{
 			{Signature: "devices [网卡名]", Summary: "发现局域网在线设备（IP/MAC/主机名/网关角色）"},
-			{Signature: "sniff [--spoof] [--targets ip1,ip2] [--iface 网卡]", Summary: "实时嗅探 + 应用层标注；--spoof 叠加 ARP 欺骗 MITM，退出自动还原"},
+			{Signature: "sniff [--recon] [--spoof] [--targets ip1,ip2] [--iface 网卡]", Summary: "bettercap 风格事件流；--recon 预填充主机表，--spoof 叠加 ARP 欺骗 MITM，退出自动还原"},
 			{Signature: "scan_ports <目标> [端口]", Summary: "nmap 风格 TCP 扫描：open/closed/filtered + banner"},
 			{Signature: "bind [--port N] [--token 令牌]", Summary: "被控端：bind shell 监听，等待控制端接入"},
 			{Signature: "shell <ip> [命令] [--token 令牌]", Summary: "控制端：shell <ip> bash 交互会话；wifisec <ip> <命令> 一步执行"},
@@ -104,6 +104,7 @@ var helpExamples = []helpExample{
 	{Command: "wifisec 192.168.1.123 whoami", Comment: "单命令一步执行，远端退出码映射本地"},
 	{Command: "wifisec devices", Comment: "局域网在线设备"},
 	{Command: "wifisec sniff", Comment: "被动嗅探：本机流量 + ARP/DHCP 广播"},
+	{Command: "wifisec sniff --recon", Comment: "主动 ARP 扫描预填充主机表后被动嗅探"},
 	{Command: "wifisec sniff --spoof --targets 192.168.1.66", Comment: "ARP 欺骗 MITM，观测目标流量"},
 	{Command: "wifisec scan_ports 192.168.1.1 22,80,8000-8100", Comment: "自定义端口规格"},
 	{Command: "wifisec get_packet en0 30 capture.pcap", Comment: "抓 30 秒并落盘"},

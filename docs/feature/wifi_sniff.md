@@ -27,13 +27,14 @@ go install github.com/ctkqiang/wifisec/cmd/wifisec@latest
 
 ## 1. 功能概述
 
-`wifisec sniff` 是 bettercap 风格的实时流量观测命令：直读当前连接网络的原始以太网帧，按协议解析并以 Wireshark Info 列风格实时滚动输出。`--spoof` 开启 ARP 欺骗（对应 bettercap 的 `net.spoof`），把目标主机与网关之间的流量引到本机透明转发，退出时自动还原全部系统改动。
+`wifisec sniff` 是 bettercap 风格的实时流量观测命令：直读当前连接网络的原始以太网帧，按协议解析为语义事件流（DNS 查询、HTTP 请求、TLS SNI、ARP who-has、凭据告警、新主机上线）实时滚动输出。`--recon` 在会话启动时主动 ARP 扫描预填充主机表；`--spoof` 开启 ARP 欺骗（对应 bettercap 的 `net.spoof`），把目标主机与网关之间的流量引到本机透明转发，退出时自动还原全部系统改动。
 
 | 属性 | 值 |
 |:---|:---|
-| 命令 | `wifisec sniff [--spoof] [--targets ip1,ip2] [--iface 网卡]` |
+| 命令 | `wifisec sniff [--recon] [--spoof] [--targets ip1,ip2] [--iface 网卡]` |
 | 运行模式 | 前台运行，`Ctrl-C` 终止并自动清理 |
-| 被动模式 | 只读网卡帧，DNS/HTTP/TLS SNI 实时标注 |
+| 被动模式 | 只读网卡帧，DNS/HTTP/SNI/ARP/主机上线实时标注 |
+| 主动侦察 | `--recon` 启动时 ARP 扫描预填充主机表 |
 | 欺骗模式 | 双向 ARP 毒化 + IP 转发 + ICMP redirect 压制 |
 | 毒化周期 | 1 秒全量刷新，目标 who-has 网关时即时应答 |
 | 恢复策略 | 退出时以真实 MAC 重发 5 轮恢复帧 |
@@ -104,15 +105,18 @@ Windows 开启路由转发需写注册表 `IPEnableRouter` 并重启 `RemoteAcce
 
 ## 4. 应用层解析
 
-被动与欺骗模式共用同一套解析器（[internal/ethernet/l7.go](../../internal/ethernet/l7.go)），命中后在实时行内追加标注：
+被动与欺骗模式共用同一套解析器（[internal/ethernet/l7.go](../../internal/ethernet/l7.go)），命中后产出 bettercap 风格的语义事件：
 
-| 协议 | 触发条件 | 输出示例 |
+| 事件标签 | 触发条件 | 输出示例 |
 |:---|:---|:---|
-| DNS 查询 | UDP 目的端口 53 且 QR=0 | `dns 查询 router.local` |
-| HTTP 请求 | TCP 目的端口 80 且首行匹配方法集 | `GET /index.html HTTP/1.1 · Host: example.com` |
-| TLS SNI | TCP 目的端口 443 且 ClientHello 携带 server_name | `sni www.example.com` |
+| `[dns]` | UDP 目的端口 53 且 QR=0 | `[dns] 192.168.1.66  api.example.com (A)` |
+| `[http]` | TCP 目的端口 80 且首行匹配方法集 | `[http] 192.168.1.66  GET /index.html · Host: example.com` |
+| `[sni]` | TCP 目的端口 443 且 ClientHello 携带 server_name | `[sni] 192.168.1.66  www.example.com` |
+| `[arp]` | ARP 请求帧（opcode 1） | `[arp] 192.168.1.66  who-has 192.168.1.1` |
+| `[host]` | HostTracker 首次观测到新 IP | `[host] 192.168.1.109  新主机 (aa:bb:cc:dd:ee:ff · Apple)` |
+| `[cred]` | HTTP 明文携带 Basic Auth/Cookie/表单口令 | `[cred] 192.168.1.66  POST 命中 basic 凭据` |
 
-解析器为纯字节解析，不做流重组：HTTP 只看首段、TLS 只看首个 ClientHello。所有字段读取前执行长度边界检查，畸形/截断帧返回空摘要，任何一帧都不会中断会话。
+解析器为纯字节解析，不做流重组：HTTP 只看首段、TLS 只看首个 ClientHello。所有字段读取前执行长度边界检查，畸形/截断帧返回空摘要，任何一帧都不会中断会话。凭据事件不输出 User/Pass 值，只标注类型，防止口令泄露到终端/日志。
 
 ---
 
@@ -159,9 +163,13 @@ Windows 开启路由转发需写注册表 `IPEnableRouter` 并重启 `RemoteAcce
 | LAN 发现（网段枚举 / TCP 探测） | `functions/devices.go` |
 | 权限 GUI 预弹窗 | `checkRootWithGUI` / `checkAdminWithGUI` |
 | 信号处理器 | `setupSignalHandler` |
-| ARP 帧构造 | `internal/ethernet/arp.go`（新增） |
+| ARP 帧构造 | `internal/ethernet/arp.go` |
+| OUI 厂商查询 | `internal/ethernet/oui.go` |
+| HTTP 凭据提取 | `internal/ethernet/cred.go` |
+| 主机跟踪 | `internal/ethernet/host.go` |
+| 事件过滤 | `internal/functions/sniff_event.go` |
 
-sniff 新增的代码仅包括：`ethernet/arp.go`（帧构造）、`ethernet/l7.go`（应用层解析）、`platform/writer/`（三平台发帧端口）、`platform/fwd/`（转发开关）、`mitm/spoof.go`（毒化状态机）与 `functions/sniff_cmd.go`（编排）。
+sniff 新增的代码包括：`ethernet/arp.go`（帧构造 + ParseARP）、`ethernet/l7.go`（应用层解析）、`ethernet/oui.go`（OUI 厂商表）、`ethernet/cred.go`（HTTP 凭据提取）、`ethernet/host.go`（HostTracker 主机跟踪）、`platform/writer/`（三平台发帧端口）、`platform/fwd/`（转发开关）、`mitm/spoof.go`（毒化状态机）、`functions/sniff_event.go`（事件过滤器 + 主机表输出）与 `functions/sniff_cmd.go`（编排）。
 
 ---
 
@@ -173,9 +181,19 @@ sniff 新增的代码仅包括：`ethernet/arp.go`（帧构造）、`ethernet/l7
 sudo wifisec sniff
 ```
 
-自动选择无线网卡（枚举失败回落默认路由网卡），实时输出本机流量与广播帧。
+自动选择无线网卡（枚举失败回落默认路由网卡），实时输出本机流量与广播帧的事件流。
 
-### 6.2 ARP 欺骗 MITM
+### 6.2 主动侦察（recon）
+
+```bash
+sudo wifisec sniff --recon
+```
+
+会话启动时主动并发 ARP 扫描整个网段，把在线主机的 IP/MAC/厂商灌入主机表当冷启动底图。之后的被动嗅探中，已知主机不再触发 `[host]` 新发现事件，只有真正新出现的设备才告警。
+
+`--recon` 可与 `--spoof` 组合使用——先扫描预填充再开启欺骗。
+
+### 6.3 ARP 欺骗 MITM
 
 ```bash
 # 毒化网段内全部在线主机（最多 32 台，超过截断并告警）
@@ -190,17 +208,31 @@ sudo wifisec sniff --spoof --targets 192.168.1.66 --iface en0
 
 目标未显式指定时自动全网段发现：枚举网段 → TCP 探测触发 ARP 解析 → 查邻居表取 MAC。目标不在线或 MAC 未解析会被跳过并告警。
 
-### 6.3 输出示例
+### 6.4 输出示例
 
 ```
 实时嗅探接口 en0 · Ctrl-C 结束
-ARP 欺骗 MITM：网关 192.168.1.1 ↔ 目标 1 台（192.168.1.66）
-目标流量将途经本机，DNS 查询 / HTTP 请求 / TLS SNI 会实时标注
-警告：kill -9 会跳过恢复帧，目标将断网直至其 ARP 缓存老化（通常 1-5 分钟）
+WPA2 下被动模式只能看到本机流量与广播帧（ARP/DHCP/mDNS）
+要观测他人单播流量请加 --spoof 启用 ARP 欺骗（仅限已授权网络）
 
-#1024    192.168.1.66 → 192.168.1.1  UDP  dns 查询 api.example.com (74 B)
-#1025    192.168.1.66 → 93.184.216.34  TCP  sni www.example.com (517 B)
-#1026    192.168.1.66 → 93.184.216.34  TCP  GET /index.html HTTP/1.1 · Host: example.com (382 B)
+[arp] 192.168.1.1  who-has 192.168.1.66
+[dns] 192.168.1.109  api.example.com (A)
+[sni] 192.168.1.109  www.example.com
+[host] 192.168.1.66  新主机 (a4:50:75:11:22:33 · Apple)
+[http] 192.168.1.66  GET /login.html · Host: 192.168.1.1
+[cred] 192.168.1.66  POST 命中 basic 凭据
+… 上一秒 12 条事件已折叠
+
+嗅探期间观测到的主机
+┌──────────────┬──────────────────┬──────────┬──────┬──────┐
+│ IP 地址      │ MAC 地址         │ 厂商     │ 事件数│ 角色 │
+├──────────────┼──────────────────┼──────────┼──────┼──────┤
+│ 192.168.1.1  │ a4:50:75:aa:bb:cc│ Apple    │    18│ 网关 │
+│ 192.168.1.66 │ a4:50:75:11:22:33│ Apple    │    42│      │
+│ 192.168.1.109│ 5c:97:a3:dd:ee:ff│ Apple    │     7│      │
+└──────────────┴──────────────────┴──────────┴──────┴──────┘
+嗅探结束：1284 帧 · 640.2 KB · 时长 2m13s
+协议分布：TCP 612 · UDP 401 · ARP 156 · ICMP6 89 · ...
 ```
 
 ---
@@ -215,8 +247,8 @@ ARP 欺骗 MITM：网关 192.168.1.1 ↔ 目标 1 台（192.168.1.66）
   ├── 权限检查（GUI 预弹窗 + root/管理员）
   ├── 网卡选择（--iface / 位置参数 / 自动：无线优先）
   │
+  ├── [spoof||recon] 网关获取（lan.DefaultGateway）
   ├── [spoof] 材料收集
-  │     ├── lan.DefaultGateway() → 网关 IP
   │     ├── 全网段枚举或显式列表 → TCP 探测 → 邻居表 → 真实 MAC
   │     └── MAC 未知的候选跳过并告警
   │
@@ -224,11 +256,20 @@ ARP 欺骗 MITM：网关 192.168.1.1 ↔ 目标 1 台（192.168.1.66）
   │     ├── fwd.Enable：备份旧值 → 开转发 → 压制 redirect
   │     └── writer.Open：独立发送句柄
   │
-  ├── capture.Open → 横幅 → Spoofer.Start（首轮毒化 + 1s ticker）
+  ├── capture.Open → 横幅
+  ├── HostTracker + EventFilter 就绪
+  │
+  ├── [recon] 主动 ARP 扫描
+  │     ├── planDiscoveryTargets → probeHosts → lan.Neighbors
+  │     └── tracker.Preload（静默灌入，不触发 [host] 事件）
+  │
+  ├── Spoofer.Start（首轮毒化 + 1s ticker）
   │
   ├── 读循环（sniffReadLoop）
   │     ├── 过滤本机自发帧（源 MAC 比对）
-  │     ├── SummarizeWithL7 → 协议统计 → 令牌桶限速打印
+  │     ├── Summarize → 协议统计
+  │     ├── EventFilter.Filter → [dns]/[http]/[sni]/[arp]/[host]/[cred] 事件
+  │     ├── 令牌桶限速打印（40 条/秒）
   │     ├── spoofer.Observe（who-has 网关即时应答）
   │     └── Ctrl-C → 退出循环
   │
@@ -236,7 +277,7 @@ ARP 欺骗 MITM：网关 192.168.1.1 ↔ 目标 1 台（192.168.1.66）
         ├── Spoofer.Stop：5 轮真实 MAC 恢复帧
         ├── writer.Close
         ├── fwd.Disable：按备份还原转发与 redirect
-        └── 统计输出（帧数 · 字节 · 时长 · 协议分布）
+        └── printSniffHostSummary：主机表 + 统计输出
 ```
 
 ---
@@ -245,9 +286,10 @@ ARP 欺骗 MITM：网关 192.168.1.1 ↔ 目标 1 台（192.168.1.66）
 
 | 属性 | `wifisec get_packet` | `wifisec sniff` |
 |:---|:---|:---|
-| 定位 | 取证落盘（pcap 文件） | 实时观测（终端滚动） |
-| 输出 | 二进制 pcap，事后 Wireshark 分析 | 人读摘要 + 应用层标注 |
-| 应用层解析 | 无（EAPOL 除外） | DNS / HTTP / TLS SNI |
+| 定位 | 取证落盘（pcap 文件） | 实时观测（事件流 + 主机表） |
+| 输出 | 二进制 pcap，事后 Wireshark 分析 | bettercap 风格语义事件 + 退出主机表 |
+| 应用层解析 | 无（EAPOL 除外） | DNS / HTTP / SNI / ARP / 凭据 / 主机跟踪 |
+| 主动侦察 | 无 | `--recon` ARP 扫描预填充主机表 |
 | ARP 欺骗 | 无 | `--spoof` 双向毒化 MITM |
 | 系统改动 | 无 | spoof 模式改转发设置，退出还原 |
 | 帧完整性 | 全部落盘 | 只统计与显示，不落盘 |

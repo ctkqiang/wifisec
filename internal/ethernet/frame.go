@@ -31,12 +31,14 @@ const (
 
 // FrameSummary 是一帧面向终端展示的摘要；pcap 写入不依赖这里的任何字段。
 type FrameSummary struct {
-	Proto  string // 协议标签：TCP / UDP / ARP / ICMP / EAPOL ...
-	Src    string // 源端点（IP:端口，无端口协议退化为 IP，再退化为 MAC）
-	Dst    string // 目的端点
-	Info   string // Wireshark Info 列风格的补充说明，如 ARP who-has / TCP SYN
-	L7     string // 应用层命中标签（dns/http/sni），由 SummarizeWithL7 回填
-	Length int    // 实际捕获长度
+	Proto  string           // 协议标签：TCP / UDP / ARP / ICMP / EAPOL ...
+	Src    string           // 源端点（IP:端口，无端口协议退化为 IP，再退化为 MAC）
+	Dst    string           // 目的端点
+	Info   string           // Wireshark Info 列风格的补充说明，如 ARP who-has / TCP SYN
+	L7     string           // 应用层命中标签（dns/http/sni），由 SummarizeWithL7 回填
+	Length int              // 实际捕获长度
+	SrcMAC net.HardwareAddr // 二层源 MAC，供 OUI 厂商查询与主机表跟踪
+	DstMAC net.HardwareAddr // 二层目的 MAC
 }
 
 // Summarize 解析一帧；格式畸形时退化为“裸 MAC + EtherType”摘要而不是报错，
@@ -50,8 +52,12 @@ func Summarize(frame []byte) FrameSummary {
 		return summary
 	}
 
-	srcMAC := net.HardwareAddr(frame[6:12]).String()
-	dstMAC := net.HardwareAddr(frame[0:6]).String()
+	// 二层 MAC 一旦确定即固化到结构，后续 ARP 摘要、主机表与厂商查询共用此切片。
+	summary.SrcMAC = net.HardwareAddr(frame[6:12])
+	summary.DstMAC = net.HardwareAddr(frame[0:6])
+
+	srcMAC := summary.SrcMAC.String()
+	dstMAC := summary.DstMAC.String()
 
 	offset, etherType := decodeVLAN(frame)
 
@@ -94,28 +100,28 @@ func decodeVLAN(frame []byte) (int, uint16) {
 }
 
 // fillARP 解析 28 字节 ARP 报文，输出 nmap/wireshark 风格的 who-has/is-at。
+// 报文解析下沉到 ParseARP，这里只把字段映射成摘要文案；两者同步靠 ARPInfo。
 func fillARP(summary *FrameSummary, frame []byte) {
 	summary.Proto = "ARP"
-	if len(frame) < 42 {
+
+	info, ok := ParseARP(frame)
+	if !ok {
 		summary.Info = "ARP 帧不完整"
 
 		return
 	}
 
-	opcode := binary.BigEndian.Uint16(frame[20:22])
-	senderIP := net.IP(frame[28:32]).String()
-	targetIP := net.IP(frame[38:42]).String()
+	senderIP := info.SenderIP.String()
+	targetIP := info.TargetIP.String()
+	summary.Src, summary.Dst = senderIP, targetIP
 
-	switch opcode {
-	case 1:
-		summary.Src, summary.Dst = senderIP, targetIP
+	switch info.Opcode {
+	case arpOperRequest:
 		summary.Info = fmt.Sprintf("who-has %s tell %s", targetIP, senderIP)
-	case 2:
-		summary.Src, summary.Dst = senderIP, targetIP
-		summary.Info = fmt.Sprintf("reply %s is-at %s", senderIP, net.HardwareAddr(frame[22:28]).String())
+	case arpOperReply:
+		summary.Info = fmt.Sprintf("reply %s is-at %s", senderIP, info.SenderMAC.String())
 	default:
-		summary.Src, summary.Dst = senderIP, targetIP
-		summary.Info = fmt.Sprintf("opcode=%d", opcode)
+		summary.Info = fmt.Sprintf("opcode=%d", info.Opcode)
 	}
 }
 

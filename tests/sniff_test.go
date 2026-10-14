@@ -26,6 +26,16 @@ func TestParseSniffCommandArgs(t *testing.T) {
 			want:      functions.SniffCommandOptions{Spoof: true},
 		},
 		{
+			name:      "--recon 布尔开关",
+			arguments: []string{"--recon"},
+			want:      functions.SniffCommandOptions{Recon: true},
+		},
+		{
+			name:      "--recon 与 --spoof 组合",
+			arguments: []string{"--recon", "--spoof"},
+			want:      functions.SniffCommandOptions{Recon: true, Spoof: true},
+		},
+		{
 			name:      "--targets 逗号分隔列表",
 			arguments: []string{"--spoof", "--targets", "192.168.1.66,192.168.1.107"},
 			want: functions.SniffCommandOptions{
@@ -102,6 +112,10 @@ func TestParseSniffCommandArgs(t *testing.T) {
 
 			if options.Spoof != item.want.Spoof {
 				t.Errorf("Spoof = %v，期望 %v", options.Spoof, item.want.Spoof)
+			}
+
+			if options.Recon != item.want.Recon {
+				t.Errorf("Recon = %v，期望 %v", options.Recon, item.want.Recon)
 			}
 
 			if len(options.Targets) != len(item.want.Targets) {

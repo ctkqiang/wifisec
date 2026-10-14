@@ -135,7 +135,7 @@ wifisec brute <ssid|bssid> with-pass: <字典> [串口]   # 在线密码字典�
 wifisec clone <ssid>:<密码> up [nokick] [串口]        # 克隆同名热点（Evil Twin），Ctrl-C 结束
 wifisec clone down [串口]                 # 停止固件上的克隆热点
 wifisec devices [网卡名]                  # 列出当前局域网在线设备（IP/MAC/主机名/网关），免 root
-wifisec sniff [--spoof] [--targets ip1,ip2] [--iface 网卡]   # 实时嗅探 + DNS/HTTP/SNI 标注（需 root/管理员）；--spoof ARP 欺骗 MITM，退出自动还原
+wifisec sniff [--recon] [--spoof] [--targets ip1,ip2] [--iface 网卡]   # bettercap 风格事件流（需 root/管理员）；--recon ARP 扫描预填充主机表，--spoof ARP 欺骗 MITM，退出自动还原
 wifisec scan_ports <目标> [端口]          # nmap 风格 TCP 扫描：open/closed/filtered + banner
 wifisec bind [--port N] [--token 令牌]    # 被控端：bind shell 监听，等待控制端接入
 wifisec <ip> bash [--token 令牌]          # 控制端：交互 shell（IP 开头自动路由）
@@ -158,7 +158,7 @@ wifisec help                              # 用法总览
 | `brute`   | 在线密码字典爆破，命中即停并输出 SSID/BSSID/密码凭证块（ESP 协处理器；无设备时回落本机网卡） | [wifi_brute_force.md](docs/feature/wifi_brute_force.md) |
 | `clone`   | 热点克隆（Evil Twin）：同名同密码 SoftAP + 可选 kick 驱赶真实 AP 客户端（ESP 协处理器；无设备时回落 Linux hostapd） | [wifi_clone.md](docs/feature/wifi_clone.md) |
 | `devices` | 局域网设备发现：TCP 探针刷 ARP + 系统邻居表交叉，输出 IP/MAC/主机名/角色，四平台免 root | [lan_analysis.md](docs/feature/lan_analysis.md) |
-| `sniff` | bettercap 风格实时嗅探（需 root/管理员）：DNS/HTTP/TLS SNI 实时标注；`--spoof` 双向 ARP 毒化 + IP 转发 + redirect 压制的透明 MITM，退出自动还原（Windows 欺骗不支持，被动可用） | [wifi_sniff.md](docs/feature/wifi_sniff.md) |
+| `sniff` | bettercap 风格事件流（需 root/管理员）：DNS/HTTP/SNI/ARP/凭据/主机上线实时标注；`--recon` ARP 扫描预填充主机表；`--spoof` 双向 ARP 毒化 + IP 转发 + redirect 压制的透明 MITM，退出自动还原（Windows 欺骗不支持，被动可用） | [wifi_sniff.md](docs/feature/wifi_sniff.md) |
 | `scan_ports` | nmap 风格 TCP connect 扫描（200 并发、1.5s 超时），open/closed/filtered 三态 + 被动 banner 抓取，四平台免 root | [lan_analysis.md](docs/feature/lan_analysis.md) |
 | `bind` / `shell` | 横向移动：被控端 bind shell 监听 TCP（HMAC 挑战应答认证，令牌不落网），控制端 `wifisec <ip> bash` 交互 shell 或单命令一步执行，stdout/stderr 实时回传，超时击杀回退出码 124 | [lateral_movement.md](docs/feature/lateral_movement.md) |
 | `get_packet` | 连接态网卡抓包：Linux AF_PACKET / macOS BPF / Windows Npcap，实时摘要限速打印，全帧写 pcap 供 Wireshark 分析；`--eapol` 实时分析握手，`--pmkid` 主动会话与抓包共存 | [lan_analysis.md](docs/feature/lan_analysis.md) · [wifi_pmkid.md](docs/feature/wifi_pmkid.md) |

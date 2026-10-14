@@ -21,6 +21,36 @@ const (
 	arpOperReply    = 2
 )
 
+// ARPInfo 只保留「控制台摘要 + 网关识别」要用到的字段；
+// 目标 MAC 在请求帧中恒为零，不入结构以免调用方误读。
+type ARPInfo struct {
+	Opcode    uint16
+	SenderIP  net.IP
+	SenderMAC net.HardwareAddr
+	TargetIP  net.IP
+}
+
+// ParseARP 解析一帧 ARP over Ethernet；长度不足或 EtherType 不匹配时返回 false。
+// 与 buildArpFrame 共享布局常量，避免两套偏移各走各的而漂移。
+func ParseARP(frame []byte) (ARPInfo, bool) {
+	if len(frame) < arpFrameLength {
+		return ARPInfo{}, false
+	}
+
+	if binary.BigEndian.Uint16(frame[12:14]) != arpEtherType {
+		return ARPInfo{}, false
+	}
+
+	info := ARPInfo{
+		Opcode:    binary.BigEndian.Uint16(frame[20:22]),
+		SenderMAC: net.HardwareAddr(frame[22:28]),
+		SenderIP:  net.IP(frame[28:32]).To4(),
+		TargetIP:  net.IP(frame[38:42]).To4(),
+	}
+
+	return info, true
+}
+
 // BuildArpReply 构造单播 ARP 应答帧：向 targetMAC 声称
 // senderIP 由 senderMAC 持有。欺骗帧与恢复帧共用这一个构造器，
 // 差异只在调用方传入的 sender 组合是真还是假。

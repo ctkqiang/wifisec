@@ -6,7 +6,7 @@
 
 ### 新增
 
-- **实时嗅探与 ARP 欺骗 MITM（`wifisec sniff`）**：bettercap 风格被动嗅探当前连接网络（Linux AF_PACKET / macOS BPF / Windows Npcap，需 root/管理员），DNS 查询 / HTTP 请求 / TLS SNI 实时标注 + 40 行/秒限速 + 退出输出协议分布；`--spoof` 叠加双向 ARP 毒化（1s 刷新 + who-has 即时应答）与 IP 转发 / ICMP redirect 压制，退出按启动前备份以真实 MAC 重发 5 轮恢复帧完整还原，Windows 欺骗入口明确拒绝、被动嗅探不受影响
+- **实时嗅探与 ARP 欺骗 MITM（`wifisec sniff`）**：bettercap 风格事件流（Linux AF_PACKET / macOS BPF / Windows Npcap，需 root/管理员），产出 [dns]/[http]/[sni]/[arp]/[host]/[cred] 语义事件 + 40 条/秒限速 + 退出输出主机表（IP/MAC/厂商/事件数/角色）与协议分布；`--recon` 会话启动时主动 ARP 扫描预填充主机表（对应 bettercap net.recon）；`--spoof` 叠加双向 ARP 毒化（1s 刷新 + who-has 即时应答）与 IP 转发 / ICMP redirect 压制，退出按启动前备份以真实 MAC 重发 5 轮恢复帧完整还原，Windows 欺骗入口明确拒绝、被动嗅探不受影响
 - **横向移动通道（`bind` / `shell`）**：被控端 `wifisec bind` 监听 TCP（默认 9485），HMAC-SHA256 挑战应答认证（令牌不落网、抓包重放无效），空令牌自动生成 128 位随机令牌并打印；控制端 `wifisec <ip> bash` 交互 shell、`wifisec <ip> <命令>` 单命令一步执行（IP 开头自动路由），stdout/stderr 实时回传，远端退出码映射本地，命令超时击杀并返回退出码 124
 - 跨平台 CI 编译工作流（macOS / Ubuntu / Windows）
 - GitHub Release 发布与下载通道

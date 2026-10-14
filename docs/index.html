@@ -346,16 +346,20 @@ IP 地址        MAC 地址           主机名    角色
 
       <section id="cmd-sniff">
         <h2>sniff · 实时嗅探与 ARP 欺骗 MITM<a class="anchor" href="#cmd-sniff">#</a></h2>
-        <p>bettercap 风格的实时流量观测（Linux AF_PACKET、macOS BPF、Windows Npcap，需 root/管理员）：直读网卡帧并逐行标注 <strong>DNS 查询 / HTTP 请求 / TLS SNI</strong>，40 行/秒限速折叠显示，退出时输出协议分布统计。<code>--spoof</code> 叠加 ARP 欺骗 MITM（对应 bettercap 的 net.spoof）：对网关与目标双向 1s 毒化 + who-has 即时应答，同时开启 IP 转发并压制 ICMP redirect（Linux procfs / macOS sysctl），<strong>退出时按启动前备份以真实 MAC 重发 5 轮恢复帧</strong>完整还原。</p>
+        <p>bettercap 风格的事件流（Linux AF_PACKET、macOS BPF、Windows Npcap，需 root/管理员）：直读网卡帧并产出语义事件 <strong>[dns] / [http] / [sni] / [arp] / [host] / [cred]</strong>，40 条/秒限速折叠显示，退出时输出主机表与协议分布统计。<code>--recon</code> 在会话启动时主动 ARP 扫描预填充主机表（对应 bettercap 的 net.recon）。<code>--spoof</code> 叠加 ARP 欺骗 MITM（对应 bettercap 的 net.spoof）：对网关与目标双向 1s 毒化 + who-has 即时应答，同时开启 IP 转发并压制 ICMP redirect（Linux procfs / macOS sysctl），<strong>退出时按启动前备份以真实 MAC 重发 5 轮恢复帧</strong>完整还原。</p>
         <pre><code class="lang-bash">sudo wifisec sniff                 <span class="cmt"># 被动嗅探：本机流量 + ARP/DHCP/mDNS 广播</span>
+sudo wifisec sniff --recon         <span class="cmt"># 主动 ARP 扫描预填充主机表后被动嗅探</span>
 sudo wifisec sniff --spoof --targets 192.168.1.46,192.168.1.47   <span class="cmt"># ARP 欺骗 MITM，观测目标流量</span>
 sudo wifisec sniff --iface en0 --spoof   <span class="cmt"># 显式指定网卡（多网卡/VPN 场景）</span></code></pre>
         <pre><code class="lang-log">[信息] 实时嗅探接口 en0 · Ctrl-C 结束
-[信息] ARP 欺骗 MITM：网关 192.168.1.1 ↔ 目标 1 台（192.168.1.46）
-[信息] 目标流量将途经本机，DNS 查询 / HTTP 请求 / TLS SNI 会实时标注
-[信息] #1234   192.168.1.46 → 192.168.1.1  UDP  dns 查询 api.example.com (78 B)
-[信息] #1235   192.168.1.46 → 93.184.216.34  TCP  GET / HTTP/1.1 · Host: example.com (462 B)
-[信息] #1236   192.168.1.46 → 104.16.132.229  TCP  SNI sni.example.com (517 B)
+[信息] WPA2 下被动模式只能看到本机流量与广播帧（ARP/DHCP/mDNS）
+[信息] [arp] 192.168.1.1  who-has 192.168.1.46
+[信息] [dns] 192.168.1.46  api.example.com (A)
+[信息] [sni] 192.168.1.46  www.example.com
+[信息] [host] 192.168.1.109  新主机 (a4:50:75:11:22:33 · Apple)
+[信息] [http] 192.168.1.46  GET /login.html · Host: 192.168.1.1
+[信息] [cred] 192.168.1.46  POST 命中 basic 凭据
+[信息] 嗅探期间观测到的主机
 [信息] 嗅探结束：4821 帧 · 3.6 MB · 时长 2m14s
 协议分布：ARP 2210 · UDP 1602 · TCP 1009</code></pre>
         <div class="alert info">

@@ -9,6 +9,7 @@ import (
 
 	"github.com/ctkqiang/wifisec/internal/ethernet"
 	"github.com/ctkqiang/wifisec/internal/mitm"
+	"github.com/ctkqiang/wifisec/internal/platform/lan"
 )
 
 // sniff 测试的固定地址材料：192.168.1.1 为网关，.10 为本机，.66/.107 为目标。
@@ -404,5 +405,321 @@ func TestNewSpooferRejectsBadMaterials(t *testing.T) {
 		if _, err := mitm.NewSpoofer(&recordingPort{}, item.selfMAC, item.gatewayIP, item.gatewayMAC, item.targets); err == nil {
 			t.Errorf("%s：应返回错误", item.name)
 		}
+	}
+}
+
+// TestParseARP 验证 ParseARP 从请求/应答帧中正确提取 Opcode、Sender、Target。
+func TestParseARP(t *testing.T) {
+	cases := []struct {
+		name     string
+		build    func() ([]byte, error)
+		opcode   uint16
+		senderIP net.IP
+		targetIP net.IP
+	}{
+		{
+			name: "请求帧",
+			build: func() ([]byte, error) {
+				return ethernet.BuildArpRequest(net.IP{192, 168, 1, 66}, sniffSelfMAC, sniffGatewayIP)
+			},
+			opcode:   1,
+			senderIP: net.IP{192, 168, 1, 66},
+			targetIP: sniffGatewayIP,
+		},
+		{
+			name: "应答帧",
+			build: func() ([]byte, error) {
+				return ethernet.BuildArpReply(sniffGatewayIP, sniffGatewayMAC, net.IP{192, 168, 1, 66}, sniffSelfMAC)
+			},
+			opcode:   2,
+			senderIP: sniffGatewayIP,
+			targetIP: net.IP{192, 168, 1, 66},
+		},
+	}
+
+	for _, item := range cases {
+		frame, err := item.build()
+		if err != nil {
+			t.Fatalf("%s：构造帧失败：%v", item.name, err)
+		}
+
+		info, ok := ethernet.ParseARP(frame)
+		if !ok {
+			t.Fatalf("%s：ParseARP 返回 false", item.name)
+		}
+
+		if info.Opcode != item.opcode {
+			t.Errorf("%s：Opcode = %d，期望 %d", item.name, info.Opcode, item.opcode)
+		}
+
+		if !info.SenderIP.Equal(item.senderIP) {
+			t.Errorf("%s：SenderIP = %s，期望 %s", item.name, info.SenderIP, item.senderIP)
+		}
+
+		if !info.TargetIP.Equal(item.targetIP) {
+			t.Errorf("%s：TargetIP = %s，期望 %s", item.name, info.TargetIP, item.targetIP)
+		}
+	}
+}
+
+// TestParseARPFailsOnBadInput 覆盖太短帧与错误 EtherType。
+func TestParseARPFailsOnBadInput(t *testing.T) {
+	cases := []struct {
+		name  string
+		frame []byte
+	}{
+		{"太短帧", make([]byte, 20)},
+		{"非 ARP EtherType", append(make([]byte, 40), 0x08, 0x00)},
+	}
+
+	for _, item := range cases {
+		if _, ok := ethernet.ParseARP(item.frame); ok {
+			t.Errorf("%s：应返回 false", item.name)
+		}
+	}
+}
+
+// TestLookupVendor 覆盖已知 OUI、未知前缀、全零 MAC 与非 6 字节 MAC。
+func TestLookupVendor(t *testing.T) {
+	cases := []struct {
+		name string
+		mac  net.HardwareAddr
+		want string
+	}{
+		{"Apple", net.HardwareAddr{0xa4, 0x50, 0x75, 0x11, 0x22, 0x33}, "Apple"},
+		{"Samsung", net.HardwareAddr{0x00, 0x12, 0xFB, 0x44, 0x55, 0x66}, "Samsung"},
+		{"Espressif", net.HardwareAddr{0x24, 0x0A, 0xC4, 0x77, 0x88, 0x99}, "Espressif"},
+		{"Tuya", net.HardwareAddr{0xD8, 0xD6, 0x68, 0x11, 0x22, 0x33}, "Tuya"},
+		{"TP-Link", net.HardwareAddr{0xB4, 0xB0, 0x24, 0x11, 0x22, 0x33}, "TP-Link"},
+		{"Unknown", net.HardwareAddr{0x01, 0x02, 0x03, 0x11, 0x22, 0x33}, "Unknown"},
+		{"随机化 MAC", net.HardwareAddr{0x12, 0x34, 0x56, 0x11, 0x22, 0x33}, "随机化"},
+		{"全零 MAC", net.HardwareAddr{0, 0, 0, 0, 0, 0}, "Unknown"},
+		{"非 6 字节", net.HardwareAddr{0xa4, 0x50, 0x75}, "Unknown"},
+	}
+
+	for _, item := range cases {
+		if got := ethernet.LookupVendor(item.mac); got != item.want {
+			t.Errorf("%s：LookupVendor = %q，期望 %q", item.name, got, item.want)
+		}
+	}
+}
+
+// TestParseCredential 覆盖 Basic Auth、Cookie、表单与无凭据四种情况。
+func TestParseCredential(t *testing.T) {
+	cases := []struct {
+		name     string
+		payload  []byte
+		credType string
+		found    bool
+	}{
+		{
+			name:     "Basic Auth",
+			payload:  []byte("GET / HTTP/1.1\r\nAuthorization: Basic dXNlcjpwYXNz\r\n\r\n"),
+			credType: "basic",
+			found:    true,
+		},
+		{
+			name:     "Cookie",
+			payload:  []byte("GET / HTTP/1.1\r\nCookie: session=abc123\r\n\r\n"),
+			credType: "cookie",
+			found:    true,
+		},
+		{
+			name:     "表单 POST",
+			payload:  []byte("POST /login HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nuser=admin&pass=secret"),
+			credType: "form",
+			found:    true,
+		},
+		{
+			name:     "无凭据",
+			payload:  []byte("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"),
+			credType: "",
+			found:    false,
+		},
+	}
+
+	for _, item := range cases {
+		cred, ok := ethernet.ParseCredential(item.payload)
+		if ok != item.found {
+			t.Errorf("%s：found = %v，期望 %v", item.name, ok, item.found)
+
+			continue
+		}
+
+		if item.found && cred.Type != item.credType {
+			t.Errorf("%s：Type = %q，期望 %q", item.name, cred.Type, item.credType)
+		}
+	}
+
+	// Basic Auth 的 User/Pass 应被正确解码。
+	cred, ok := ethernet.ParseCredential([]byte("GET / HTTP/1.1\r\nAuthorization: Basic dXNlcjpwYXNz\r\n\r\n"))
+	if !ok || cred.Type != "basic" {
+		t.Fatal("Basic Auth 应命中")
+	}
+
+	if cred.User != "user" || cred.Pass != "pass" {
+		t.Errorf("Basic Auth 解码：User=%q Pass=%q，期望 user/pass", cred.User, cred.Pass)
+	}
+}
+
+// TestHostTrackerObserve 验证首次/重复观测、角色标注与 Snapshot 排序。
+func TestHostTrackerObserve(t *testing.T) {
+	tracker := ethernet.NewHostTracker(net.IP{192, 168, 1, 10}, sniffGatewayIP)
+
+	appleMAC := net.HardwareAddr{0xa4, 0x50, 0x75, 0x11, 0x22, 0x33}
+
+	host, isNew := tracker.Observe(net.IP{192, 168, 1, 66}, appleMAC)
+	if !isNew {
+		t.Error("首次 Observe 应返回 isNew=true")
+	}
+
+	if host.Vendor != "Apple" {
+		t.Errorf("Vendor = %q，期望 Apple", host.Vendor)
+	}
+
+	if host.Role != "" {
+		t.Errorf("Role = %q，期望空串", host.Role)
+	}
+
+	host, isNew = tracker.Observe(sniffGatewayIP, sniffGatewayMAC)
+	if !isNew {
+		t.Error("网关首次 Observe 应返回 isNew=true")
+	}
+
+	if host.Role != "gateway" {
+		t.Errorf("网关 Role = %q，期望 gateway", host.Role)
+	}
+
+	_, isNew = tracker.Observe(net.IP{192, 168, 1, 66}, appleMAC)
+	if isNew {
+		t.Error("重复 Observe 应返回 isNew=false")
+	}
+
+	hosts := tracker.Snapshot()
+	if len(hosts) != 2 {
+		t.Fatalf("Snapshot 长度 = %d，期望 2", len(hosts))
+	}
+
+	if !hosts[0].IP.Equal(sniffGatewayIP) {
+		t.Errorf("Snapshot[0].IP = %s，期望 192.168.1.1（按 IP 升序）", hosts[0].IP)
+	}
+}
+
+// TestHostTrackerPreload 验证 Preload 不覆盖已有条目，新条目静默加入。
+func TestHostTrackerPreload(t *testing.T) {
+	tracker := ethernet.NewHostTracker(net.IP{192, 168, 1, 10}, sniffGatewayIP)
+
+	appleMAC := net.HardwareAddr{0xa4, 0x50, 0x75, 0x11, 0x22, 0x33}
+	_, _ = tracker.Observe(net.IP{192, 168, 1, 66}, appleMAC)
+
+	neighbors := []lan.Neighbor{
+		{IP: net.IP{192, 168, 1, 66}, HWAddr: net.HardwareAddr{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}},
+		{IP: net.IP{192, 168, 1, 77}, HWAddr: net.HardwareAddr{0x5c, 0x97, 0xa3, 0x77, 0x88, 0x99}},
+	}
+	tracker.Preload(neighbors)
+
+	hosts := tracker.Snapshot()
+	if len(hosts) != 2 {
+		t.Fatalf("Snapshot 长度 = %d，期望 2", len(hosts))
+	}
+
+	for _, h := range hosts {
+		if h.IP.Equal(net.IP{192, 168, 1, 66}) {
+			if !bytes.Equal(h.MAC, appleMAC) {
+				t.Errorf("Preload 覆盖了已有条目的 MAC：got %x，want %x", h.MAC, appleMAC)
+			}
+		}
+
+		if h.IP.Equal(net.IP{192, 168, 1, 77}) {
+			if h.Vendor != "Apple" {
+				t.Errorf("Preload 新条目 Vendor = %q，期望 Apple", h.Vendor)
+			}
+		}
+	}
+}
+
+// TestParseL7StructuredEvent 验证 ParseL7 返回结构化 L7Event 而非拼接字符串。
+func TestParseL7StructuredEvent(t *testing.T) {
+	cases := []struct {
+		name    string
+		frame   []byte
+		kind    string
+		dnsName string
+		method  string
+		sni     string
+	}{
+		{
+			name:    "DNS 查询",
+			frame:   mustIPv4Frame(t, 17, dnsQueryUDP("router.local")),
+			kind:    ethernet.L7DNS,
+			dnsName: "router.local",
+		},
+		{
+			name:   "HTTP 请求",
+			frame:  mustIPv4Frame(t, 6, httpRequestTCP()),
+			kind:   ethernet.L7HTTP,
+			method: "GET",
+		},
+		{
+			name:  "TLS SNI",
+			frame: mustIPv4Frame(t, 6, tlsClientHelloTCP("www.example.com")),
+			kind:  ethernet.L7SNI,
+			sni:   "www.example.com",
+		},
+	}
+
+	for _, item := range cases {
+		event, ok := ethernet.ParseL7(item.frame)
+		if !ok {
+			t.Fatalf("%s：ParseL7 返回 false", item.name)
+		}
+
+		if event.Kind != item.kind {
+			t.Errorf("%s：Kind = %q，期望 %q", item.name, event.Kind, item.kind)
+		}
+
+		if item.dnsName != "" && event.DNSName != item.dnsName {
+			t.Errorf("%s：DNSName = %q，期望 %q", item.name, event.DNSName, item.dnsName)
+		}
+
+		if item.method != "" && event.HTTPMethod != item.method {
+			t.Errorf("%s：HTTPMethod = %q，期望 %q", item.name, event.HTTPMethod, item.method)
+		}
+
+		if item.sni != "" && event.SNI != item.sni {
+			t.Errorf("%s：SNI = %q，期望 %q", item.name, event.SNI, item.sni)
+		}
+	}
+}
+
+// TestParseL7Credential 验证 HTTP POST 携带 Basic Auth 时返回 L7CRED 事件。
+func TestParseL7Credential(t *testing.T) {
+	tcp := make([]byte, 20)
+	binary.BigEndian.PutUint16(tcp[0:2], 50000)
+	binary.BigEndian.PutUint16(tcp[2:4], 80)
+	tcp[12] = 5 << 4
+
+	httpWithCred := append(tcp, []byte("POST /login HTTP/1.1\r\nAuthorization: Basic dXNlcjpwYXNz\r\n\r\n")...)
+	frame := mustIPv4Frame(t, 6, httpWithCred)
+
+	event, ok := ethernet.ParseL7(frame)
+	if !ok {
+		t.Fatal("ParseL7 应命中")
+	}
+
+	if event.Kind != ethernet.L7CRED {
+		t.Errorf("Kind = %q，期望 %q", event.Kind, ethernet.L7CRED)
+	}
+
+	if event.Credential.Type != "basic" {
+		t.Errorf("Credential.Type = %q，期望 basic", event.Credential.Type)
+	}
+
+	if event.Credential.User != "user" {
+		t.Errorf("Credential.User = %q，期望 user", event.Credential.User)
+	}
+
+	if event.Credential.Pass != "pass" {
+		t.Errorf("Credential.Pass = %q，期望 pass", event.Credential.Pass)
 	}
 }
