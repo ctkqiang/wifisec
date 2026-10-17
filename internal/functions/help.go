@@ -19,14 +19,16 @@ import (
 	"github.com/ctkqiang/wifisec/internal/constants"
 )
 
-// helpArt 是 banner 左侧的无线电塔：四行纯 ASCII，任何等宽终端渲染
-// 一致，不依赖 Unicode 线框字符；各行的显示宽由 padRight 统一拉齐。
-const helpArt = `     |
+// helpArt 是 banner 左侧的无线电塔：五行纯 ASCII，任何等宽终端渲染
+// 一致，不依赖 Unicode 线框字符；塔顶两道同心弧表示信号发射，
+// 各行的显示宽由 padRight 统一拉齐。
+const helpArt = `    )))
+   (  ))
     /|\
    / | \
   '--|--'`
 
-// helpArtWidth 是塔架四行中最宽一行的显示宽，作右列文字的对齐基准。
+// helpArtWidth 是塔架五行中最宽一行的显示宽，作右列文字的对齐基准。
 const helpArtWidth = 9
 
 // helpSignatureCap 限定签名列最大显示宽：超过的命令签名独占一行、
@@ -91,31 +93,53 @@ var helpGroups = []helpGroup{
 	},
 }
 
-// helpExamples 覆盖每类攻击面的最小可运行示例，注释说明意图而非参数。
-var helpExamples = []helpExample{
-	{Command: "wifisec list", Comment: "周边网络全景"},
-	{Command: "wifisec deauth 'MyWiFi'", Comment: "按 SSID，同名多 AP 全部命中"},
-	{Command: "wifisec deauth 01:23:45:67:89:ab", Comment: "按 BSSID 精确锁定"},
-	{Command: "wifisec jam 'MyWiFi'", Comment: "双帧干扰（deauth+disassoc）"},
-	{Command: "wifisec jam all", Comment: "全频段：所有可见 AP 逐个打击"},
-	{Command: "wifisec brute 'MyWiFi' with-pass: pass.txt", Comment: "字典爆破，命中即停"},
-	{Command: "wifisec clone 'MyWiFi':'same-password' up", Comment: "克隆热点并 kick 真实 AP"},
-	{Command: "wifisec bind --token lab2026", Comment: "被控端：bind shell 等待控制端接入"},
-	{Command: "wifisec 192.168.1.123 bash --token lab2026", Comment: "横向移动：IP 开头自动路由进交互 shell"},
-	{Command: "wifisec 192.168.1.123 whoami", Comment: "单命令一步执行，远端退出码映射本地"},
-	{Command: "wifisec devices", Comment: "局域网在线设备"},
-	{Command: "wifisec sniff", Comment: "被动嗅探：本机流量 + ARP/DHCP 广播"},
-	{Command: "wifisec sniff --recon", Comment: "主动 ARP 扫描预填充主机表后被动嗅探"},
-	{Command: "wifisec sniff --spoof --targets 192.168.1.66", Comment: "ARP 欺骗 MITM，观测目标流量"},
-	{Command: "wifisec scan_ports 192.168.1.1 22,80,8000-8100", Comment: "自定义端口规格"},
-	{Command: "wifisec get_packet en0 30 capture.pcap", Comment: "抓 30 秒并落盘"},
-	{Command: "wifisec get_packet --eapol --ssid 'MyWiFi' 60 eapol.pcap", Comment: "连接态抓包并实时分析握手"},
-	{Command: "wifisec pmkid 01:23:45:67:89:ab -o out.22000", Comment: "主动获取 PMKID（免客户端、免踢人）"},
-	{Command: "wifisec extract capture.pcap --hashcat out.22000", Comment: "离线提取 pcap 中的握手/PMKID 为 hashcat 行"},
-	{Command: "wifisec ids", Comment: "无线入侵检测（sudo 启用帧级监测）"},
-	{Command: "wifisec ids 'MyWiFi'", Comment: "只盯一个 SSID（伪造者/降级/针对它的风暴）"},
-	{Command: "wifisec heatmap 'MyWiFi'", Comment: "走位勘测：空格钉采样，Tab 切换目标"},
-	{Command: "wifisec man sniff", Comment: "阅读 sniff 的完整手册页"},
+// helpExampleGroups 覆盖每类攻击面的最小可运行示例，按「先侦察、
+// 再攻击、后防御」的作战顺序分组——二十余条平铺的示例没人读得完，
+// 分组小标题让用户按意图直接跳到对应段落；注释说明意图而非参数。
+var helpExampleGroups = []helpExampleGroup{
+	{
+		Title: "侦察",
+		Items: []helpExample{
+			{Command: "wifisec list", Comment: "周边网络全景"},
+			{Command: "wifisec devices", Comment: "局域网在线设备"},
+			{Command: "wifisec sniff", Comment: "被动嗅探：本机流量 + ARP/DHCP 广播"},
+			{Command: "wifisec sniff --recon", Comment: "主动 ARP 扫描预填充主机表后被动嗅探"},
+			{Command: "wifisec sniff --spoof --targets 192.168.1.66", Comment: "ARP 欺骗 MITM，观测目标流量"},
+		},
+	},
+	{
+		Title: "无线攻击",
+		Items: []helpExample{
+			{Command: "wifisec deauth 'MyWiFi'", Comment: "按 SSID，同名多 AP 全部命中"},
+			{Command: "wifisec deauth 01:23:45:67:89:ab", Comment: "按 BSSID 精确锁定"},
+			{Command: "wifisec jam 'MyWiFi'", Comment: "双帧干扰（deauth+disassoc）"},
+			{Command: "wifisec jam all", Comment: "全频段：所有可见 AP 逐个打击"},
+			{Command: "wifisec brute 'MyWiFi' with-pass: pass.txt", Comment: "字典爆破，命中即停"},
+			{Command: "wifisec clone 'MyWiFi':'same-password' up", Comment: "克隆热点并 kick 真实 AP"},
+			{Command: "wifisec pmkid 01:23:45:67:89:ab -o out.22000", Comment: "主动获取 PMKID（免客户端、免踢人）"},
+		},
+	},
+	{
+		Title: "局域网与横向",
+		Items: []helpExample{
+			{Command: "wifisec scan_ports 192.168.1.1 22,80,8000-8100", Comment: "自定义端口规格"},
+			{Command: "wifisec bind --token lab2026", Comment: "被控端：bind shell 等待控制端接入"},
+			{Command: "wifisec 192.168.1.123 bash --token lab2026", Comment: "横向移动：IP 开头自动路由进交互 shell"},
+			{Command: "wifisec 192.168.1.123 whoami", Comment: "单命令一步执行，远端退出码映射本地"},
+			{Command: "wifisec get_packet en0 30 capture.pcap", Comment: "抓 30 秒并落盘"},
+			{Command: "wifisec get_packet --eapol --ssid 'MyWiFi' 60 eapol.pcap", Comment: "连接态抓包并实时分析握手"},
+			{Command: "wifisec extract capture.pcap --hashcat out.22000", Comment: "离线提取 pcap 中的握手/PMKID 为 hashcat 行"},
+		},
+	},
+	{
+		Title: "防御 · 勘测 · 手册",
+		Items: []helpExample{
+			{Command: "wifisec ids", Comment: "无线入侵检测（sudo 启用帧级监测）"},
+			{Command: "wifisec ids 'MyWiFi'", Comment: "只盯一个 SSID（伪造者/降级/针对它的风暴）"},
+			{Command: "wifisec heatmap 'MyWiFi'", Comment: "走位勘测：空格钉采样，Tab 切换目标"},
+			{Command: "wifisec man sniff", Comment: "阅读 sniff 的完整手册页"},
+		},
+	},
 }
 
 // helpDocs 指向仓库内逐命令的深度文档与在线文档站。
@@ -147,6 +171,12 @@ type helpGroup struct {
 type helpExample struct {
 	Command string
 	Comment string
+}
+
+// helpExampleGroup 把示例按作战意图分组，标题渲染为灰色小标题。
+type helpExampleGroup struct {
+	Title string
+	Items []helpExample
 }
 
 // helpDoc 是文档指引条目。
@@ -206,13 +236,16 @@ func renderHelp() string {
 	builder.WriteString("\n")
 
 	builder.WriteString(paintText(constants.ColorBold, "用法"))
-	builder.WriteString(":\n  wifisec <命令> [参数]\n\n")
+	builder.WriteString(":\n  wifisec <命令> [参数]\n")
+	builder.WriteString("  wifisec man <命令>     ")
+	builder.WriteString(paintText(constants.ColorGray, "# 阅读该命令的完整手册页"))
+	builder.WriteString("\n\n")
 
 	builder.WriteString(renderCommands())
 
 	builder.WriteString(paintText(constants.ColorBold, "示例"))
 	builder.WriteString(":\n")
-	builder.WriteString(renderList(exampleRows(), exampleColumn()))
+	builder.WriteString(renderExamples())
 	builder.WriteString("\n")
 
 	builder.WriteString(paintText(constants.ColorBold, "文档"))
@@ -225,8 +258,9 @@ func renderHelp() string {
 	return builder.String()
 }
 
-// renderBanner 拼装左侧塔架与右侧信息行：塔架四行，右列依次是
-// 版本（加粗）、组织、仓库与黄色授权边界，行行对齐。
+// renderBanner 拼装左侧塔架与右侧信息行：塔架五行（顶端两道信号弧
+// 不与文字同行），右列依次是版本（青色加粗）、组织、仓库与黄色
+// 授权边界；首行留空使文字块与塔身垂直居中，行行对齐。
 func renderBanner() string {
 	project := strings.TrimSuffix(constants.DeveloperMetadata.ProjectUrl, ".git")
 
@@ -234,7 +268,8 @@ func renderBanner() string {
 		text  string
 		color string
 	}{
-		{text: "wifisec " + constants.DeveloperMetadata.Version, color: constants.ColorBold},
+		{text: "", color: ""},
+		{text: "wifisec " + constants.DeveloperMetadata.Version, color: constants.ColorBold + constants.ColorCyan},
 		{text: constants.DeveloperMetadata.Organisation + " · 无线安全审计", color: ""},
 		{text: project, color: constants.ColorGray},
 		{text: "仅限自有网络或已获书面授权的测试环境使用", color: constants.ColorYellow},
@@ -274,18 +309,19 @@ func signatureColumn() int {
 	return column + 2
 }
 
-// renderCommands 输出分组命令表：组标题加粗、备注灰色；超宽签名的
-// 描述换行缩进到描述列，与 docker help 的长选项处理一致。
+// renderCommands 输出分组命令表：组标题带 ▸ 标记染青加粗（与
+// makefile 输出的标记语言一致），备注灰色；超宽签名的描述换行
+// 缩进到描述列，与 docker help 的长选项处理一致。
 func renderCommands() string {
 	column := signatureColumn()
 	builder := &strings.Builder{}
 
 	for _, group := range helpGroups {
-		builder.WriteString(paintText(constants.ColorBold, group.Title))
+		builder.WriteString(paintText(constants.ColorBold+constants.ColorCyan, "▸ "+group.Title))
 		if group.Note != "" {
 			builder.WriteString(paintText(constants.ColorGray, " · "+group.Note))
 		}
-		builder.WriteString(":\n")
+		builder.WriteString("\n")
 
 		for _, command := range group.Commands {
 			if cellWidth(command.Signature) > column {
@@ -310,25 +346,39 @@ func renderCommands() string {
 	return builder.String()
 }
 
-// exampleRows / exampleColumn 把示例表降维成两列数据并计算对齐宽。
-func exampleRows() [][2]string {
-	rows := make([][2]string, 0, len(helpExamples))
-	for _, item := range helpExamples {
-		rows = append(rows, [2]string{item.Command, "# " + item.Comment})
-	}
-
-	return rows
-}
-
-func exampleColumn() int {
+// renderExamples 输出分组示例表：组标题灰色置暗退居二线，命令列
+// 跨组统一对齐——列宽取全部组里的最大命令宽，视觉上是连续的一张表。
+func renderExamples() string {
 	column := 0
-	for _, item := range helpExamples {
-		if width := cellWidth(item.Command); width > column {
-			column = width
+	for _, group := range helpExampleGroups {
+		for _, item := range group.Items {
+			if width := cellWidth(item.Command); width > column {
+				column = width
+			}
+		}
+	}
+	column += 2
+
+	builder := &strings.Builder{}
+
+	for _, group := range helpExampleGroups {
+		builder.WriteString("  ")
+		builder.WriteString(paintText(constants.ColorGray, group.Title))
+		builder.WriteString("\n")
+
+		for _, item := range group.Items {
+			padding := strings.Repeat(" ", column-cellWidth(item.Command))
+			fmt.Fprintf(
+				builder,
+				"    %s%s%s\n",
+				item.Command,
+				padding,
+				paintText(constants.ColorGray, "# "+item.Comment),
+			)
 		}
 	}
 
-	return column + 2
+	return builder.String()
 }
 
 // docRows / docColumn 同上，服务于文档指引表。
