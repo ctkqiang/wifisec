@@ -82,6 +82,7 @@
           <a href="#cmd-ids">ids · 无线入侵检测</a>
           <a href="#cmd-heatmap">heatmap · 信号热力图</a>
           <a href="#cmd-help">help · 用法总览</a>
+          <a href="#cmd-man">man · 内置手册页</a>
         </div>
         <div class="nav-group">
           <div class="nav-group-title">固件</div>
@@ -569,6 +570,14 @@ wifisec heatmap 'MyWiFi' floor.txt <span class="cmt"># 叠加平面图（#=墙 �
       <section id="cmd-help">
         <h2>help · 用法总览<a class="anchor" href="#cmd-help">#</a></h2>
         <p>裸跑 <code>wifisec</code>（无子命令）或 <code>wifisec help</code> 均输出开发者信息与全部子命令用法。</p>
+      </section>
+
+      <!-- ---------- 内置手册页 ---------- -->
+      <section id="cmd-man">
+        <h2>man · 内置手册页<a class="anchor" href="#cmd-man">#</a></h2>
+        <p><code>wifisec man</code> 列出全部手册主题；<code>wifisec man &lt;主题&gt;</code> 渲染该子命令的完整手册页（名称/用法/描述/选项/示例/另见，经典 man 版式）。页面随二进制内嵌分发，离线可用且与当前版本严格同步；管道/重定向或设置 <code>NO_COLOR</code> 时自动输出纯文本。</p>
+        <pre><code class="lang-bash">wifisec man          # 全部主题与一行简介
+wifisec man sniff    # sniff 的完整手册页</code></pre>
       </section>
 
       <!-- ---------- 固件烧录 ---------- -->

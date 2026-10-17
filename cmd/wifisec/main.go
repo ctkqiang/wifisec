@@ -32,6 +32,7 @@ var (
 		"bind":       functions.RunBind,
 		"shell":      functions.RunShellClient,
 		"help":       functions.HelpUsage,
+		"man":        functions.RunMan,
 	}
 )
 

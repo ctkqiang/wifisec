@@ -147,6 +147,7 @@ wifisec extract capture.pcap [--hashcat out.22000] [--pmkid out.16800]   # 离�
 wifisec ids [SSID] [网卡] [秒数]          # 无线入侵检测：伪造AP/KARMA/降级/泛洪/deauth 风暴，可锁定单个 SSID
 wifisec heatmap [SSID] [平面图.txt]       # TUI 信号热力图：走位采样 + IDW 插值 + AP 方位估计，免 root
 wifisec help                              # 用法总览
+wifisec man <主题>                        # 阅读内置手册页（无参列出全部主题）
 ```
 
 | 命令      | 功能                       | 详细文档                                                 |

@@ -86,6 +86,7 @@ var helpGroups = []helpGroup{
 		Commands: []helpCommand{
 			{Signature: "upgrade", Summary: "从 GitHub Releases 下载最新版并原地替换"},
 			{Signature: "help", Summary: "显示本帮助"},
+			{Signature: "man [主题]", Summary: "阅读内置手册页；无参列出全部主题"},
 		},
 	},
 }
@@ -114,6 +115,7 @@ var helpExamples = []helpExample{
 	{Command: "wifisec ids", Comment: "无线入侵检测（sudo 启用帧级监测）"},
 	{Command: "wifisec ids 'MyWiFi'", Comment: "只盯一个 SSID（伪造者/降级/针对它的风暴）"},
 	{Command: "wifisec heatmap 'MyWiFi'", Comment: "走位勘测：空格钉采样，Tab 切换目标"},
+	{Command: "wifisec man sniff", Comment: "阅读 sniff 的完整手册页"},
 }
 
 // helpDocs 指向仓库内逐命令的深度文档与在线文档站。
